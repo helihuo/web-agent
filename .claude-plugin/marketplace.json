@@ -1,0 +1,25 @@
+{
+  "name": "web-agent",
+  "description": "Install web-agent directly from this repo.",
+  "owner": {
+    "name": "Browser Use",
+    "url": "https://browser-use.com"
+  },
+  "plugins": [
+    {
+      "name": "web-agent",
+      "description": "Direct CDP browser control for agents: coordinate clicks, screenshots, persistent Python session, local Chrome or Browser Use cloud. Ships skills only; the `web-agent` CLI is a one-time install prerequisite.",
+      "category": "automation",
+      "source": ".",
+      "homepage": "https://github.com/helihuo/web-agent",
+      "keywords": [
+        "browser",
+        "automation",
+        "cdp",
+        "chrome",
+        "scraping",
+        "screenshot"
+      ]
+    }
+  ]
+}
