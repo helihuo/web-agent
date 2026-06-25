@@ -1,6 +1,8 @@
 <br />
 
-# Web Agent 
+# Web Agent 
+
+🌐 **English** | [中文](./README.zh-CN.md) 
 
 Connect an LLM directly to your real browser with a thin, editable CDP harness. For browser tasks where you need **complete freedom**.
 

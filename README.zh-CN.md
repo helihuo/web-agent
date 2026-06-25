@@ -1,6 +1,8 @@
 <br />
 
-# Web Agent 
+# Web Agent 
+
+🌐 [English](./README.md) | **中文** 
 
 通过一个轻量、可编辑的 CDP 工具，将 LLM 直接连接到你的真实浏览器。适用于需要**完全自由**的浏览器任务。
 
