@@ -1,36 +1,17 @@
-"""CDP WS holder + IPC relay (Unix socket on POSIX, TCP loopback on Windows). One daemon per BU_NAME."""
+"""CDP WebSocket 持有者 + IPC 中继（POSIX 系统使用 Unix 套接字，Windows 使用 TCP 环回）。每个 BU_NAME 对应一个守护进程。"""
 import asyncio, json, os, socket, sys, time, urllib.error, urllib.request
 from urllib.parse import urlparse
 from collections import deque
 from pathlib import Path
 
 from . import _ipc as ipc
-from . import auth
 from . import paths
+from .helpers import NAME, INTERNAL
+from .paths import _load_env, _load_env_file
 from .cdp_client import CDPClient
-
-
-def _load_env():
-    repo_root = Path(__file__).resolve().parents[2]
-    workspace = paths.workspace_dir()
-    for p in (repo_root / ".env", workspace / ".env"):
-        if not p.exists():
-            continue
-        _load_env_file(p)
-
-
-def _load_env_file(p):
-    for line in p.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-
 
 _load_env()
 
-NAME = os.environ.get("BU_NAME", "default")
 SOCK = ipc.sock_addr(NAME)
 LOG = str(ipc.log_path(NAME))
 PID = str(ipc.pid_path(NAME))
@@ -65,9 +46,6 @@ PROFILES = [
     Path.home() / "AppData/Local/Microsoft/Edge SxS/User Data",
     Path.home() / "AppData/Local/BraveSoftware/Brave-Browser/User Data",
 ]
-INTERNAL = ("chrome://", "chrome-untrusted://", "devtools://", "chrome-extension://", "about:")
-BU_API = "https://api.browser-use.com/api/v3"
-REMOTE_ID = os.environ.get("BU_BROWSER_ID")
 
 
 def log(msg):
@@ -82,13 +60,13 @@ async def _silent(coro):
 
 
 def _ws_from_devtools_active_port(http_url: str) -> str | None:
-    """When /json/version returns 404 (Chrome 147+ default profile), match DevToolsActivePort by port."""
+    """当 /json/version 返回 404 时（Chrome 147+ 默认配置文件），通过端口匹配 DevToolsActivePort。"""
     p = urlparse(http_url)
     want_port = str(p.port) if p.port else ""
     if not want_port:
         return None
     host = p.hostname or "127.0.0.1"
-    if ":" in host:  # urlparse strips IPv6 brackets; restore them for the ws:// URL
+    if ":" in host:  # urlparse 会剥离 IPv6 方括号；为 ws:// URL 恢复它们
         host = f"[{host}]"
     for base in PROFILES:
         try:
@@ -106,9 +84,9 @@ def get_ws_url():
     if url := os.environ.get("BU_CDP_WS"):
         return url
     if url := os.environ.get("BU_CDP_URL"):
-        # HTTP DevTools endpoint (e.g. http://127.0.0.1:9333) — resolve to ws via /json/version.
-        # Use this for a dedicated automation Chrome on a non-default profile, which avoids the
-        # M144 "Allow remote debugging" dialog and the M136 default-profile lockdown.
+        # HTTP DevTools 端点（例如 http://127.0.0.1:9333）— 通过 /json/version 解析为 ws。
+        # 将此用于非默认配置文件上的专用自动化 Chrome，这可以避免
+        # M144 "允许远程调试"对话框和 M136 默认配置文件锁定。
         deadline = time.time() + 30
         last_err = None
         base_url = url.rstrip("/")
@@ -162,24 +140,7 @@ def get_ws_url():
                 raise RuntimeError("permission-blocked: Chrome is reachable, but the per-session Allow remote debugging popup has not been accepted")
         except (OSError, KeyError, ValueError):
             continue
-    raise RuntimeError(f"DevToolsActivePort not found in {[str(p) for p in PROFILES]} — enable chrome://inspect/#remote-debugging, or set BU_CDP_WS for a remote browser")
-
-
-def stop_remote():
-    if not REMOTE_ID:
-        return
-    try:
-        key = auth.get_browser_use_api_key()
-        req = urllib.request.Request(
-            f"{BU_API}/browsers/{REMOTE_ID}",
-            data=json.dumps({"action": "stop"}).encode(),
-            method="PATCH",
-            headers={"X-Browser-Use-API-Key": key, "Content-Type": "application/json"},
-        )
-        urllib.request.urlopen(req, timeout=15).read()
-        log(f"stopped remote browser {REMOTE_ID}")
-    except Exception as e:
-        log(f"stop_remote failed ({REMOTE_ID}): {e}")
+    raise RuntimeError(f"DevToolsActivePort not found in {[str(p) for p in PROFILES]} — enable chrome://inspect/#remote-debugging")
 
 
 def is_real_page(t):
@@ -239,17 +200,11 @@ class Daemon:
     async def start(self):
         self.stop = asyncio.Event()
         url = get_ws_url()
-        log(f"connecting to {url}")
+        log("connecting to browser...") # 不再打印完整的 WebSocket URL，避免泄露敏感信息
         self.cdp = CDPClient(url)
         try:
             await self.cdp.start()
         except Exception as e:
-            if os.environ.get("BU_CDP_WS"):
-                raise RuntimeError(
-                    f"CDP WS handshake failed: {e} -- remote browser WebSocket connection failed. "
-                    "This can happen when network policy blocks the connection, the WS URL is wrong or expired, or the remote endpoint is down. "
-                    "If you use Browser Use cloud, verify auth and get a fresh URL via start_remote_daemon()."
-                )
             raise RuntimeError(f"CDP WS handshake failed: {e} -- click Allow in Chrome if prompted, then retry")
         await self.attach_first_page()
         orig = self.cdp._event_registry.handle_event
@@ -384,7 +339,7 @@ async def serve(d):
     serve_task = asyncio.create_task(ipc.serve(NAME, handler))
     stop_task = asyncio.create_task(d.stop.wait())
     await asyncio.sleep(0.05)  # let serve() bind so sock_addr() resolves to the live endpoint
-    log(f"listening on {ipc.sock_addr(NAME)} (name={NAME}, remote={REMOTE_ID or 'local'})")
+    log(f"listening on {ipc.sock_addr(NAME)} (name={NAME})")
     try:
         await asyncio.wait({serve_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
         if serve_task.done(): await serve_task  # surfaces a serve crash
@@ -422,6 +377,5 @@ if __name__ == "__main__":
         log(f"fatal: {e}")
         sys.exit(1)
     finally:
-        stop_remote()
         try: os.unlink(PID)
         except FileNotFoundError: pass

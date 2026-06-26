@@ -1,7 +1,7 @@
-"""Best-effort, opt-out telemetry for web-agent.
+"""web-agent 的尽力而为、可选择退出的遥测功能。
 
-Only low-cardinality operational events are sent. Callers should pass categories,
-states, and booleans, never URLs, selectors, page text, prompts, or credentials.
+仅发送低基数的操作事件。调用者应传递类别、
+状态和布尔值，永远不要传递 URL、选择器、页面文本、提示或凭据。
 """
 
 from __future__ import annotations
@@ -16,12 +16,13 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from . import paths
+from .paths import read_json_config, write_json_config
 
 
-POSTHOG_KEY = "phc_rCPCLPtaXB3EuBdiH7JLKtU2Wj5iPnuwdsbw58CnjYXc"
-POSTHOG_HOST = "https://eu.i.posthog.com"
-DISABLE_ENVS = ("WA_TELEMETRY", "WEB_AGENT_TELEMETRY")
-FORBIDDEN_KEYS = (
+POSTHOG_KEY = "phc_rCPCLPtaXB3EuBdiH7JLKtU2Wj5iPnuwdsbw58CnjYXc"  # PostHog API 密钥
+POSTHOG_HOST = "https://eu.i.posthog.com"  # PostHog 服务器地址
+DISABLE_ENVS = ("WA_TELEMETRY", "WEB_AGENT_TELEMETRY")  # 禁用遥测的环境变量名
+FORBIDDEN_KEYS = (  # 禁止出现在属性中的敏感键名
     "api_key",
     "content",
     "cookie",
@@ -44,35 +45,40 @@ FORBIDDEN_KEYS = (
 
 
 def _config_dir() -> Path:
+    """
+    获取配置目录路径。
+    """
     return paths.config_dir()
 
 
 def _config_path() -> Path:
+    """
+    获取配置文件路径。
+    """
     return _config_dir() / "telemetry.json"
 
 
 def _load_config() -> dict:
-    try:
-        return json.loads(_config_path().read_text())
-    except (FileNotFoundError, OSError, ValueError):
-        return {}
+    """
+    加载配置文件。
+    从配置文件读取并返回字典，如果文件不存在或解析失败则返回空字典。
+    """
+    return read_json_config(_config_path())
 
 
 def _save_config(data: dict) -> None:
-    path = _config_path()
-    try:
-        parent_existed = path.parent.exists()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not parent_existed and platform.system() != "Windows":
-            os.chmod(path.parent, 0o700)
-        path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
-        if platform.system() != "Windows":
-            os.chmod(path, 0o600)
-    except OSError:
-        pass
+    """
+    保存配置文件。
+    将数据序列化为 JSON 并写入配置文件，设置适当的文件权限。
+    """
+    write_json_config(_config_path(), data)
 
 
 def _version() -> str:
+    """
+    获取 web-agent 包的版本号。
+    返回包的版本字符串，如果未安装则返回空字符串。
+    """
     try:
         return version("web-agent")
     except PackageNotFoundError:
@@ -82,14 +88,26 @@ def _version() -> str:
 
 
 def _env_disabled() -> bool:
+    """
+    检查环境变量是否禁用了遥测功能。
+    如果任一环境变量设置为禁用值则返回 True。
+    """
     return any((os.environ.get(name) or "").lower() in {"0", "false", "no", "off"} for name in DISABLE_ENVS)
 
 
 def _valid_install_id(raw) -> bool:
+    """
+    验证安装 ID 是否有效。
+    检查是否为符合 UUID 格式的字符串（32-36 个十六进制字符）。
+    """
     return isinstance(raw, str) and re.fullmatch(r"[0-9a-f-]{32,36}", raw) is not None
 
 
 def _install_id(config: dict | None = None, *, create: bool = True) -> str | None:
+    """
+    获取或创建安装 ID。
+    从配置中读取安装 ID，如果无效且 create 为 True 则生成新的 UUID 并保存。
+    """
     config = config if config is not None else _load_config()
     raw = config.get("install_id")
     if _valid_install_id(raw):
@@ -102,12 +120,20 @@ def _install_id(config: dict | None = None, *, create: bool = True) -> str | Non
 
 
 def is_enabled() -> bool:
+    """
+    检查遥测功能是否启用。
+    如果环境变量未禁用且配置中未禁用则返回 True。
+    """
     if _env_disabled():
         return False
     return not bool(_load_config().get("disabled"))
 
 
 def status() -> dict:
+    """
+    获取遥测功能状态信息。
+    返回包含启用状态、禁用原因、安装 ID 和配置路径的字典。
+    """
     config = _load_config()
     env_disabled = _env_disabled()
     enabled = not env_disabled and not bool(config.get("disabled"))
@@ -121,6 +147,10 @@ def status() -> dict:
 
 
 def set_enabled(enabled: bool) -> dict:
+    """
+    设置遥测功能的启用状态。
+    更新配置中的 disabled 字段并保存，然后返回新的状态信息。
+    """
     config = _load_config()
     config["disabled"] = not enabled
     _save_config(config)
@@ -128,6 +158,10 @@ def set_enabled(enabled: bool) -> dict:
 
 
 def _safe_properties(properties: dict | None) -> dict:
+    """
+    过滤和清理属性数据。
+    移除敏感信息，限制字符串长度，确保属性安全可发送。
+    """
     out = {}
     for key, value in (properties or {}).items():
         safe_key = re.sub(r"[^A-Za-z0-9_$.-]+", "_", str(key))[:80]
@@ -147,6 +181,10 @@ def _safe_properties(properties: dict | None) -> dict:
 
 
 def capture(event: str, properties: dict | None = None) -> None:
+    """
+    捕获并发送遥测事件。
+    如果遥测启用，将事件数据和系统信息发送到 PostHog。
+    """
     if not is_enabled():
         return
     try:
@@ -179,6 +217,10 @@ def capture(event: str, properties: dict | None = None) -> None:
 
 
 def run_telemetry_cli(argv: list[str]) -> int:
+    """
+    运行遥测命令行接口。
+    处理 status、enable、disable 命令，返回退出码。
+    """
     if not argv or argv == ["status"]:
         print(json.dumps(status(), indent=2))
         return 0

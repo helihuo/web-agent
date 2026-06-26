@@ -54,28 +54,28 @@ Ask the user to tick "Allow remote debugging for this browser instance" and clic
 
 ## Interaction Skills
 
-- connection.md
-- cookies.md
-- cross-origin-iframes.md
-- dialogs.md
-- downloads.md
-- drag-and-drop.md
-- dropdowns.md
-- iframes.md
-- network-requests.md
-- print-as-pdf.md
-- profile-sync.md
-- screenshots.md
-- scrolling.md
-- shadow-dom.md
-- tabs.md
-- uploads.md
-- viewport.md
+- interaction-skills/connection.md
+- interaction-skills/cookies.md
+- interaction-skills/cross-origin-iframes.md
+- interaction-skills/dialogs.md
+- interaction-skills/downloads.md
+- interaction-skills/drag-and-drop.md
+- interaction-skills/dropdowns.md
+- interaction-skills/iframes.md
+- interaction-skills/network-requests.md
+- interaction-skills/print-as-pdf.md
+- interaction-skills/profile-sync.md
+- interaction-skills/screenshots.md
+- interaction-skills/scrolling.md
+- interaction-skills/shadow-dom.md
+- interaction-skills/tabs.md
+- interaction-skills/uploads.md
+- interaction-skills/viewport.md
 
 ## Design Constraints
 
 - Coordinate clicks default. CDP mouse events pass through iframes/shadow/cross-origin at the compositor level.
-- Keep the connection model simple: use the default daemon, `BU_NAME`, `BU_CDP_URL`, `BU_CDP_WS`, or `start_remote_daemon(...)`.
+- Keep the connection model simple: use the default daemon, `BU_NAME`, `BU_CDP_URL`, or `BU_CDP_WS`.
 - Core helpers stay short. Put task-specific helper additions in `$WA_AGENT_WORKSPACE/agent_helpers.py`.
 
 ## Gotchas
@@ -85,7 +85,6 @@ Ask the user to tick "Allow remote debugging for this browser instance" and clic
 - Omnibox popups are not real work tabs.
 - CDP target order is not Chrome's visible tab-strip order.
 - `BU_CDP_URL` is an HTTP DevTools endpoint; the daemon resolves it to WebSocket.
-- Ask before leaving cloud browsers running; stop them with `stop_remote_daemon(name)` or `PATCH /browsers/{id} {"action":"stop"}`.
 
 ## Domain Skills
 

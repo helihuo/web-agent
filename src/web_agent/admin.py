@@ -1,33 +1,40 @@
 import json
 import os
+import platform
 import re
+import shutil
 import socket
 import subprocess
 import sys
 import time
 import urllib.request
+import webbrowser
 from pathlib import Path
 
 from . import _ipc as ipc
 from . import auth
 from . import paths
+from .helpers import NAME, truncate_text
+from .paths import _load_env, _load_env_file, read_json_config, write_json_config
+from .telemetry import _version
+
+_load_env()
 
 
 def _process_start_time(pid):
-    """Opaque process-start-time fingerprint at PID, or None if unavailable.
+    """获取指定 PID 的不透明进程启动时间指纹，不可用时返回 None。
 
-    Two reads returning the same non-None value mean the PID still refers to
-    the same process; a different value means the PID was reused. Used by
-    restart_daemon() to keep the force-kill recovery path working even when
-    the daemon has already torn down its IPC socket (e.g. during a slow
-    remote shutdown), without falling back to "trust the pid file" — which
-    would re-introduce the PID-reuse hazard.
+    两次读取返回相同的非 None 值表示 PID 仍然指向同一个进程；
+    不同的值表示 PID 已被复用。restart_daemon() 使用此方法在
+    daemon 已拆除其 IPC socket（例如在缓慢的远程关闭期间）时，
+    仍能保持强制终止恢复路径正常工作，而不会退回到"信任 pid 文件"
+    ——那样会重新引入 PID 复用的风险。
 
-    Linux:   /proc/<pid>/stat field 22 (starttime in clock ticks since boot).
-    macOS:   `ps -o lstart= -p <pid>` (an absolute timestamp string).
-    Windows: GetProcessTimes via ctypes (FILETIME creation time, 100-ns since 1601).
-    Anywhere else: returns None; restart_daemon falls back to its strict
-    identify-only check, which is safer than no check at all.
+    Linux:   /proc/<pid>/stat 字段 22（自启动以来的时钟滴答数）。
+    macOS:   `ps -o lstart= -p <pid>`（绝对时间戳字符串）。
+    Windows: 通过 ctypes 调用 GetProcessTimes（FILETIME 创建时间，自 1601 年起 100 纳秒）。
+    其他平台：返回 None；restart_daemon 会退回到严格的身份验证检查，
+    这比完全不检查更安全。
     """
     if type(pid) is not int or pid <= 0:
         return None
@@ -37,11 +44,10 @@ def _process_start_time(pid):
                 raw = f.read().decode("ascii", errors="replace")
         except (FileNotFoundError, PermissionError, OSError):
             return None
-        # Field 2 is `(comm)`; comm can contain spaces and parens, so split off
-        # everything after the LAST `)` and index from there.
+        # 字段 2 是 `(comm)`；comm 可以包含空格和括号，因此从最后一个 `)` 之后分割并索引
         try:
             tail = raw[raw.rindex(")") + 2:].split()
-            return tail[19]  # starttime is field 22 (0-indexed: 21 - skipped 2 = 19)
+            return tail[19]  # starttime 是字段 22（0 索引：21 - 跳过的 2 = 19）
         except (ValueError, IndexError):
             return None
     if sys.platform == "darwin":
@@ -55,13 +61,8 @@ def _process_start_time(pid):
         s = out.decode("ascii", errors="replace").strip()
         return s or None
     if sys.platform == "win32":
-        # Windows users running a remote daemon hit the same slow-shutdown
-        # window as POSIX (stop_remote() PATCHes api.browser-use.com after
-        # the IPC socket has been torn down). Without a fingerprint here the
-        # SIGTERM gate can never pass during that window, leaving an orphan
-        # daemon that may continue to hold a billed cloud browser. Use
-        # GetProcessTimes via ctypes to read the kernel-reported creation
-        # time as a 64-bit FILETIME (100-ns intervals since 1601-01-01).
+        # Windows 平台：使用 ctypes 调用 GetProcessTimes 读取内核报告的创建时间，
+        # 作为 64 位 FILETIME（自 1601-01-01 起的 100 纳秒间隔）。
         try:
             import ctypes
             from ctypes import wintypes
@@ -104,27 +105,6 @@ def _process_start_time(pid):
     return None
 
 
-def _load_env():
-    repo_root = Path(__file__).resolve().parents[2]
-    workspace = paths.workspace_dir()
-    for p in (repo_root / ".env", workspace / ".env"):
-        if not p.exists():
-            continue
-        _load_env_file(p)
-
-
-def _load_env_file(p):
-    for line in p.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-
-
-_load_env()
-
-NAME = os.environ.get("BU_NAME", "default")
 PYPI_JSON = "https://pypi.org/pypi/web-agent/json"
 VERSION_CACHE = paths.config_dir() / "version-cache.json"
 VERSION_CACHE_TTL = 24 * 3600
@@ -139,7 +119,7 @@ def _log_tail(name):
 
 
 def _needs_chrome_remote_debugging_prompt(msg):
-    """True when Chrome needs the inspect-page permission flow."""
+    """当 Chrome 需要检查页面权限流程时返回 True。"""
     lower = (msg or "").lower()
     return (
         "devtoolsactiveport not found" in lower
@@ -158,13 +138,13 @@ def _needs_chrome_remote_debugging_prompt(msg):
 
 
 def _needs_chrome_permission_popup(msg):
-    """True when Chrome is reachable but waiting on the per-session Allow popup."""
+    """当 Chrome 可达但正在等待每个会话的允许弹窗时返回 True。"""
     lower = (msg or "").lower()
     return "permission-blocked" in lower
 
 
 def _is_local_chrome_mode(env=None):
-    """True when the daemon discovers a local Chrome instead of a remote CDP WS."""
+    """当 daemon 发现的是本地 Chrome 而非远程 CDP WS 时返回 True。"""
     env = env or {}
     return not (
         env.get("BU_CDP_WS")
@@ -175,16 +155,16 @@ def _is_local_chrome_mode(env=None):
 
 
 def daemon_alive(name=None):
-    # Ping handshake (not a bare connect) so a stale .port file + port reuse
-    # after a daemon crash doesn't make us mistake an unrelated listener for ours.
+    # 使用 Ping 握手（而非简单的连接），这样在 daemon 崩溃后陈旧的 .port 文件和端口复用
+    # 不会让我们误将无关的监听器当作我们的 daemon
     return ipc.ping(name or NAME, timeout=1.0)
 
 
 def _daemon_endpoint_names():
-    # WA_RUNTIME_DIR isolates one daemon per dir → no filename-prefix discovery,
-    # just check whether our local endpoint exists. Without WA_RUNTIME_DIR, or
-    # with WA_RUNTIME_DIR_SHARED=1, _RUNTIME is shared and we glob `wa-*.<suffix>`
-    # to find every daemon in that runtime dir.
+    # WA_RUNTIME_DIR 为每个目录隔离一个 daemon → 不使用文件名前缀发现，
+    # 只检查本地端点是否存在。没有 WA_RUNTIME_DIR 时，
+    # 或者 WA_RUNTIME_DIR_SHARED=1 时，_RUNTIME 是共享的，
+    # 我们通过 glob `wa-*.<suffix>` 查找该运行时目录中的每个 daemon
     suffix = ".port" if ipc.IS_WINDOWS else ".sock"
     if ipc.WA_RUNTIME_DIR and not ipc.WA_RUNTIME_DIR_SHARED:
         return [NAME] if (ipc._RUNTIME / f"wa{suffix}").exists() else []
@@ -218,7 +198,7 @@ def _daemon_browser_connection(name):
 
 
 def browser_connections():
-    """Live web-agent daemons with healthy CDP browser connections and their attached page."""
+    """具有健康 CDP 浏览器连接的实时 web-agent daemon 及其附加页面。"""
     out = []
     for name in _daemon_endpoint_names():
         conn = _daemon_browser_connection(name)
@@ -228,18 +208,17 @@ def browser_connections():
 
 
 def active_browser_connections():
-    """Count live web-agent daemons with a healthy CDP browser connection."""
+    """统计具有健康 CDP 浏览器连接的实时 web-agent daemon 数量。"""
     return len(browser_connections())
 
 
 def _doctor_short_text(value, limit=None):
     limit = limit or DOCTOR_TEXT_LIMIT
-    value = str(value)
-    return value if len(value) <= limit else value[:limit - 3] + "..."
+    return truncate_text(value, limit)
 
 
 def _is_snap_browser(path: str) -> bool:
-    """True when a Chrome binary path lives under /snap/ (Snap confinement on Linux)."""
+    """当 Chrome 二进制路径位于 /snap/ 下（Linux 上的 Snap 沙箱）时返回 True。"""
     # 将路径中的反斜杠替换为正斜杠，确保 Windows 和 POSIX 路径格式一致
     normalized_path = path.replace("\\", "/")
     return bool(path) and "/snap/" in normalized_path.lower()
@@ -255,11 +234,10 @@ def _doctor_snap_probe_path(path: str) -> str:
 
 
 def _doctor_probe_chrome_binary_for_snap():
-    """Return (label, probe_path) for the first Chrome/Chromium binary found, else (None, None).
+    """返回找到的第一个 Chrome/Chromium 二进制的 (标签, 探测路径)，否则返回 (None, None)。
 
-    Honors WA_CHROME_PATH and CHROME_PATH before searching PATH for common names.
+    在搜索 PATH 中的常见名称之前，优先使用 WA_CHROME_PATH 和 CHROME_PATH。
     """
-    import shutil
 
     for key in ("WA_CHROME_PATH", "CHROME_PATH"):
         raw = (os.environ.get(key) or "").strip()
@@ -287,7 +265,7 @@ def _snap_linux_headless_doc_url():
 
 
 def run_doctor_fix_snap():
-    """Print steps to replace Snap Chromium with a native Chrome for CDP. Always exit 0."""
+    """打印将 Snap Chromium 替换为原生 Chrome 以支持 CDP 的步骤。始终返回 0。"""
     doc = _snap_linux_headless_doc_url()
     print("web-agent doctor --fix-snap")
     print()
@@ -311,12 +289,12 @@ def run_doctor_fix_snap():
 
 
 def ensure_daemon(wait=60.0, name=None, env=None):
-    """Idempotent. Self-heals stale daemon, cold Chrome, and missing Allow on chrome://inspect."""
+    """幂等操作。自动修复陈旧的 daemon、冷启动的 Chrome 以及 chrome://inspect 上缺失的允许操作。"""
     if daemon_alive(name):
-        # Stale daemons accept connects AND reply to meta:* (pure Python) even when the
-        # CDP WS to Chrome is dead — probe with a real CDP call and require "result".
-        # Must go through ipc.connect so this works on Windows (TCP loopback) too;
-        # raw AF_UNIX here would fail on every warm call and churn the daemon.
+        # 陈旧的 daemon 会接受连接并回复 meta:*（纯 Python），即使到 Chrome 的 CDP WS 已断开
+        # ——使用真实的 CDP 调用进行探测并要求返回 "result"
+        # 必须通过 ipc.connect 以便在 Windows（TCP 环回）上也能正常工作；
+        # 直接使用 AF_UNIX 会在每次热调用时失败并导致 daemon  churn
         try:
             s, token = ipc.connect(name or NAME, timeout=3.0)
             resp = ipc.request(s, token, {"method": "Target.getTargets", "params": {}})
@@ -324,7 +302,6 @@ def ensure_daemon(wait=60.0, name=None, env=None):
         except Exception: pass
         restart_daemon(name)
 
-    import subprocess, sys
     local = _is_local_chrome_mode(env)
     for attempt in (0, 1):
         e = {**os.environ, **({"BU_NAME": name} if name else {}), **(env or {})}
@@ -352,54 +329,36 @@ def ensure_daemon(wait=60.0, name=None, env=None):
         raise RuntimeError(msg or f"daemon {name or NAME} didn't come up -- check {ipc.log_path(name or NAME)}")
 
 
-def stop_remote_daemon(name="remote"):
-    """Stop a remote daemon and its backing Browser Use cloud browser.
-
-    Triggers the daemon's clean shutdown, which PATCHes
-    /browsers/{id} {"action":"stop"} so billing ends and any profile
-    state in the session is persisted."""
-    # restart_daemon is misnamed — it only stops the daemon (sends
-    # shutdown, SIGTERMs if needed, unlinks socket+pid). It never
-    # restarts anything on its own; a follow-up `web-agent`
-    # call would auto-spawn a fresh one via ensure_daemon(). That
-    # "run-it-again-to-restart" workflow is why it was named that way.
-    restart_daemon(name)
-
-
 def restart_daemon(name=None):
-    """Best-effort daemon shutdown + socket/pid cleanup.
+    """尽力而为的 daemon 关闭 + socket/pid 清理。
 
-    Name is historical: callers typically follow this with another
-    `web-agent` invocation, which auto-spawns a fresh daemon via
-    ensure_daemon(). The function itself only stops.
+    名称是历史原因：调用者通常在此之后再次调用 `web-agent`，
+    这会通过 ensure_daemon() 自动生成一个新的 daemon。
+    函数本身只负责停止。
 
-    Identity is verified via ipc.identify() before any process signal, so
-    a stale pid file whose number has been reused by an unrelated process
-    is never SIGTERM'd. If the daemon is unreachable, we just clean up the
-    pid file and socket and return — never escalate to a kill-by-pid-file.
+    在任何进程信号之前通过 ipc.identify() 验证身份，
+    因此陈旧的 pid 文件（其编号已被无关进程复用）永远不会被 SIGTERM。
+    如果 daemon 不可达，我们只清理 pid 文件和 socket 并返回——
+    永远不会升级为按 pid 文件强制终止。
     """
     import signal
 
     name = name or NAME
     pid_path = str(ipc.pid_path(name))
 
-    # Two pieces of information are tracked separately:
-    #   - daemon_pid: the daemon's self-reported PID, or None. Only daemons
-    #     running this version (or newer) include `pid` in the ping response;
-    #     pre-upgrade daemons return {pong: True} only and yield None here.
-    #   - daemon_alive: whether ANY daemon answers ping. Keeps the shutdown
-    #     IPC path working across upgrades — without it, a still-running
-    #     pre-upgrade daemon would have its socket deleted out from under it
-    #     while the process stayed alive.
+    # 分别跟踪两条信息：
+    #   - daemon_pid：daemon 自报告的 PID，或 None。只有运行此版本（或更新版本）的
+    #     daemon 会在 ping 响应中包含 `pid`；升级前的 daemon 只返回 {pong: True}，
+    #     此处会返回 None。
+    #   - daemon_alive：是否有任何 daemon 响应 ping。保持关闭 IPC 路径在升级期间
+    #     正常工作——否则，仍在运行的升级前 daemon 的 socket 会在进程存活时被删除。
     daemon_pid = ipc.identify(name, timeout=5.0)
     daemon_alive = daemon_pid is not None or ipc.ping(name, timeout=1.0)
-    # Snapshot the daemon's process start-time as a secondary identity check.
-    # The IPC socket can disappear before the process exits (e.g. the shutdown
-    # path tears down the socket and then waits on a slow remote `stop` PATCH),
-    # so identify() going None partway through is not proof of process death.
-    # Comparing start-time before SIGTERM lets us recover the original
-    # force-kill behavior for slow shutdowns without re-opening the
-    # PID-reuse hole — a reused PID would have a different start-time.
+    # 快照 daemon 的进程启动时间作为次要身份检查。
+    # IPC socket 可能在进程退出前消失（例如，关闭路径拆除 socket 然后等待缓慢的
+    # 远程 `stop` PATCH），因此 identify() 中途返回 None 并不能证明进程已死亡。
+    # 在 SIGTERM 之前比较启动时间让我们能够恢复缓慢关闭的原始强制终止行为，
+    # 而不会重新打开 PID 复用漏洞——复用的 PID 会有不同的启动时间。
     daemon_start = _process_start_time(daemon_pid)
 
     if daemon_alive:
@@ -418,14 +377,12 @@ def restart_daemon(name=None):
             except (ProcessLookupError, OSError, SystemError, OverflowError):
                 break
         else:
-            # Re-verify identity before escalating to SIGTERM. Two acceptable
-            # signals, in priority order:
-            #   1. ipc.identify() still returns the same PID — daemon's IPC is
-            #      live, daemon is wedged. Safe to kill.
-            #   2. start-time fingerprint of the original PID is unchanged —
-            #      same process, just slow to exit (e.g. stuck in remote stop).
-            #      The IPC may already be gone; that's expected.
-            # If neither holds, the PID may have been reused; skip SIGTERM.
+            # 在升级为 SIGTERM 之前重新验证身份。两个可接受的信号，按优先级排序：
+            #   1. ipc.identify() 仍然返回相同的 PID——daemon 的 IPC 是活跃的，
+            #      daemon 卡住了。可以安全终止。
+            #   2. 原始 PID 的启动时间指纹未变——同一个进程，只是退出缓慢
+            #      （例如，卡在远程停止中）。IPC 可能已经消失；这是预期行为。
+            # 如果两者都不成立，PID 可能已被复用；跳过 SIGTERM。
             verified_pid = ipc.identify(name, timeout=1.0)
             same_process = verified_pid == daemon_pid or (
                 daemon_start is not None
@@ -444,197 +401,15 @@ def restart_daemon(name=None):
         pass
 
 
-def _browser_use(path, method, body=None):
-    key = auth.get_browser_use_api_key()
-    req = urllib.request.Request(
-        f"{BU_API}{path}",
-        method=method,
-        data=(json.dumps(body).encode() if body is not None else None),
-        headers={"X-Browser-Use-API-Key": key, "Content-Type": "application/json"},
-    )
-    return json.loads(urllib.request.urlopen(req, timeout=60).read() or b"{}")
-
-
-def _stop_cloud_browser(browser_id):
-    if not browser_id:
-        return
-    try:
-        _browser_use(f"/browsers/{browser_id}", "PATCH", {"action": "stop"})
-    except BaseException:
-        pass
-
-
-def _cdp_ws_from_url(cdp_url):
-    return json.loads(urllib.request.urlopen(f"{cdp_url}/json/version", timeout=15).read())["webSocketDebuggerUrl"]
-
-
-def _has_local_gui():
-    """True when this machine plausibly has a browser we can open. False on headless servers."""
-    import platform
-    system = platform.system()
-    if system in ("Darwin", "Windows"):
-        return True
-    if system == "Linux":
-        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-    return False
-
-
-def _show_live_url(url):
-    """Print liveUrl and auto-open it locally if there's a GUI."""
-    import sys, webbrowser
-    if not url: return
-    print(url)
-    if not _has_local_gui():
-        print("(no local GUI — share the liveUrl with the user)", file=sys.stderr)
-        return
-    try:
-        webbrowser.open(url, new=2)
-        print("(opened liveUrl in your default browser)", file=sys.stderr)
-    except Exception as e:
-        print(f"(couldn't auto-open: {e} — share the liveUrl with the user)", file=sys.stderr)
-
-
-def list_cloud_profiles():
-    """List cloud profiles under the current API key.
-
-    Returns [{id, name, userId, cookieDomains, lastUsedAt}, ...]. `cookieDomains`
-    is the array of domain strings the cloud profile has cookies for — use
-    `len(cookieDomains)` as a cheap 'how much is logged in' summary. Per-cookie
-    detail on a *local* profile before sync: `profile-use inspect --profile <name>`.
-
-    Paginates through all pages — the API caps `pageSize` at 100."""
-    out, page = [], 1
-    while True:
-        listing = _browser_use(f"/profiles?pageSize=100&pageNumber={page}", "GET")
-        items = listing.get("items") if isinstance(listing, dict) else listing
-        if not items:
-            break
-        for p in items:
-            detail = _browser_use(f"/profiles/{p['id']}", "GET")
-            out.append({
-                "id": detail["id"],
-                "name": detail.get("name"),
-                "userId": detail.get("userId"),
-                "cookieDomains": detail.get("cookieDomains") or [],
-                "lastUsedAt": detail.get("lastUsedAt"),
-            })
-        if isinstance(listing, dict) and len(out) >= listing.get("totalItems", len(out)):
-            break
-        page += 1
-    return out
-
-
-def _resolve_profile_name(profile_name):
-    """Find a single cloud profile by exact name; raise if 0 or >1 match."""
-    matches = [p for p in list_cloud_profiles() if p.get("name") == profile_name]
-    if not matches:
-        raise RuntimeError(f"no cloud profile named {profile_name!r} -- call list_cloud_profiles() or sync_local_profile() first")
-    if len(matches) > 1:
-        raise RuntimeError(f"{len(matches)} cloud profiles named {profile_name!r} -- pass profileId=<uuid> instead")
-    return matches[0]["id"]
-
-
-def start_remote_daemon(name="remote", profileName=None, **create_kwargs):
-    """Provision a Browser Use cloud browser and start a daemon attached to it.
-
-    kwargs forwarded to `POST /browsers` (camelCase):
-      profileId        — cloud profile UUID; start already-logged-in. Default: none (clean browser).
-      profileName      — cloud profile name; resolved client-side to profileId via list_cloud_profiles().
-      proxyCountryCode — ISO2 country code (default "us"); pass None to disable the BU proxy.
-      timeout          — minutes, 1..240.
-      customProxy      — {host, port, username, password, ignoreCertErrors}.
-      browserScreenWidth / browserScreenHeight, allowResizing, enableRecording.
-
-    Returns the full browser dict including `liveUrl`. Prints the liveUrl and
-    auto-opens it locally when a GUI is detected, so the user can watch along."""
-    if daemon_alive(name):
-        raise RuntimeError(f"daemon {name!r} already alive -- restart_daemon({name!r}) first")
-    if profileName:
-        if "profileId" in create_kwargs:
-            raise RuntimeError("pass profileName OR profileId, not both")
-        create_kwargs["profileId"] = _resolve_profile_name(profileName)
-    browser = _browser_use("/browsers", "POST", create_kwargs)
-    try:
-        ensure_daemon(
-            name=name,
-            env={"BU_CDP_WS": _cdp_ws_from_url(browser["cdpUrl"]), "BU_BROWSER_ID": browser["id"]},
-        )
-    except BaseException:
-        _stop_cloud_browser(browser.get("id"))
-        raise
-    _show_live_url(browser.get("liveUrl"))
-    return browser
-
-
 def list_local_profiles():
-    """Detected local browser profiles on this machine. Shells out to `profile-use list --json`."""
-    import json, shutil, subprocess
+    """检测此机器上的本地浏览器配置文件。调用 `profile-use list --json`。"""
     if not shutil.which("profile-use"):
         raise RuntimeError("profile-use not installed -- curl -fsSL https://browser-use.com/profile.sh | sh")
     return json.loads(subprocess.check_output(["profile-use", "list", "--json"], text=True))
 
 
-def sync_local_profile(profile_name, browser=None, cloud_profile_id=None,
-                        include_domains=None, exclude_domains=None):
-    """Sync a local profile's cookies to a cloud profile. Returns the cloud UUID.
-
-    Shells out to `profile-use sync` (v1.0.5+). Requires BROWSER_USE_API_KEY.
-    profile-use copies the profile dir to a temp and syncs from the copy, so Chrome
-    can stay open.
-
-    Args:
-      profile_name:       local Chrome profile name (as shown by `list_local_profiles`).
-      browser:            disambiguate when multiple browsers have profiles of the
-                          same name (e.g. "Google Chrome"). Default: any match.
-      cloud_profile_id:   push cookies into this existing cloud profile instead of
-                          creating a new one. Idempotent — call again to refresh
-                          the same profile. Default: create new.
-      include_domains:    only sync cookies for these domains (and subdomains).
-                          Leading dot is optional. Example: ["google.com", "stripe.com"].
-      exclude_domains:    drop cookies for these domains (and subdomains). Applied
-                          before `include_domains` so exclude wins on overlap."""
-    import shutil, subprocess, sys
-    if not shutil.which("profile-use"):
-        raise RuntimeError("profile-use not installed -- curl -fsSL https://browser-use.com/profile.sh | sh")
-    key = auth.get_browser_use_api_key()
-    cmd = ["profile-use", "sync", "--profile", profile_name]
-    if browser:
-        cmd += ["--browser", browser]
-    if cloud_profile_id:
-        cmd += ["--cloud-profile-id", cloud_profile_id]
-    for d in include_domains or []:
-        cmd += ["--domain", d]
-    for d in exclude_domains or []:
-        cmd += ["--exclude-domain", d]
-    r = subprocess.run(cmd, text=True, capture_output=True, env={**os.environ, "BROWSER_USE_API_KEY": key})
-    sys.stdout.write(r.stdout)
-    sys.stderr.write(r.stderr)
-    if r.returncode != 0:
-        raise RuntimeError(f"profile-use sync failed (exit {r.returncode})")
-    # With --cloud-profile-id the tool prints "♻️ Using existing cloud profile"
-    # instead of "Profile created: <uuid>", so we already know the UUID.
-    if cloud_profile_id:
-        return cloud_profile_id
-    m = re.search(r"Profile created:\s+([0-9a-f-]{36})", r.stdout)
-    if not m:
-        raise RuntimeError(f"profile-use did not report a profile UUID (exit {r.returncode})")
-    return m.group(1)
-
-
-def _version():
-    """Installed version of the web-agent package. Empty string if unknown."""
-    try:
-        from importlib.metadata import PackageNotFoundError, version
-        try:
-            return version("web-agent")
-        except PackageNotFoundError:
-            return ""
-    except Exception:
-        return ""
-
-
 def _repo_dir():
-    """Return the repo root if this install is an editable git clone, else None."""
+    """如果是可编辑的 git 克隆安装，返回仓库根目录，否则返回 None。"""
     for p in Path(__file__).resolve().parents:
         if (p / ".git").is_dir():
             return p
@@ -642,33 +417,24 @@ def _repo_dir():
 
 
 def _install_mode():
-    """"git" for editable clone, "pypi" for an installed wheel, "unknown" otherwise."""
+    """可编辑克隆返回 "git"，已安装的 wheel 返回 "pypi"，否则返回 "unknown"。"""
     if _repo_dir():
         return "git"
     return "pypi" if _version() else "unknown"
 
 
 def _cache_read():
-    try:
-        return json.loads(VERSION_CACHE.read_text())
-    except (FileNotFoundError, ValueError):
-        return {}
+    """读取版本缓存文件。"""
+    return read_json_config(VERSION_CACHE)
 
 
 def _cache_write(data):
-    try:
-        VERSION_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        VERSION_CACHE.write_text(json.dumps(data))
-        try:
-            os.chmod(VERSION_CACHE, 0o600)
-        except OSError:
-            pass
-    except OSError:
-        pass
+    """写入版本缓存文件。"""
+    write_json_config(VERSION_CACHE, data, dir_mode=0o700, file_mode=0o600)
 
 
 def _latest_release_tag(force=False):
-    """Return latest PyPI version, or None. Cached for 24h to avoid hammering PyPI."""
+    """返回最新的 PyPI 版本，或 None。缓存 24 小时以避免频繁请求 PyPI。"""
     cache = _cache_read()
     now = time.time()
     if not force and cache.get("tag") and now - cache.get("fetched_at", 0) < VERSION_CACHE_TTL:
@@ -676,14 +442,14 @@ def _latest_release_tag(force=False):
     try:
         tag = json.loads(urllib.request.urlopen(PYPI_JSON, timeout=5).read()).get("info", {}).get("version") or ""
     except Exception:
-        return cache.get("tag")  # fall back to last known
+        return cache.get("tag")  # 回退到上次已知的版本
     tag = tag.lstrip("v")
     _cache_write({**cache, "tag": tag, "fetched_at": now})
     return tag or None
 
 
 def _version_tuple(v):
-    """Best-effort PEP 440-ish parse: alpha < beta < rc < final."""
+    """尽力而为的 PEP 440 风格解析：alpha < beta < rc < final。"""
     m = re.match(r"^\s*v?(\d+(?:\.\d+)*)(?:(a|b|rc)(\d+))?", v or "", re.I)
     if not m:
         return (0, 0, 0, 3, 0)
@@ -696,7 +462,7 @@ def _version_tuple(v):
 
 
 def check_for_update():
-    """(current, latest, newer_available). latest may be None if the API was unreachable and no cache exists."""
+    """(当前版本, 最新版本, 是否有新版本)。如果 API 不可达且没有缓存，latest 可能为 None。"""
     cur = _version()
     latest = _latest_release_tag()
     newer = bool(cur and latest and _version_tuple(latest) > _version_tuple(cur))
@@ -704,8 +470,7 @@ def check_for_update():
 
 
 def print_update_banner(out=None):
-    """Print the update banner to stderr once per day. Silent when up-to-date or offline."""
-    import sys
+    """每天向 stderr 打印一次更新横幅。已是最新或离线时保持静默。"""
     out = out or sys.stderr
     cache = _cache_read()
     today = time.strftime("%Y-%m-%d")
@@ -720,8 +485,7 @@ def print_update_banner(out=None):
 
 
 def _chrome_running():
-    """Cross-platform best-effort check for a running Chromium-based browser."""
-    import platform, subprocess
+    """跨平台尽力检查是否有正在运行的基于 Chromium 的浏览器。"""
     system = platform.system()
     try:
         if system == "Windows":
@@ -736,8 +500,7 @@ def _chrome_running():
 
 
 def _open_chrome_inspect():
-    """Open chrome://inspect/#remote-debugging so the user can tick the checkbox."""
-    import platform, subprocess, webbrowser
+    """打开 chrome://inspect/#remote-debugging 以便用户可以勾选复选框。"""
     url = "chrome://inspect/#remote-debugging"
     if platform.system() == "Darwin":
         try:
@@ -756,8 +519,7 @@ def _open_chrome_inspect():
 
 
 def run_doctor():
-    """Read-only diagnostics. Exit 0 iff everything looks healthy."""
-    import platform, sys
+    """只读诊断。仅当一切看起来健康时返回 0。"""
     cur = _version()
     mode = _install_mode()
     chrome = _chrome_running()
@@ -769,8 +531,8 @@ def run_doctor():
         auth_state = {"status": "error", "source": None, "reason": str(e)}
     cloud_auth = auth_state.get("status") == "authenticated"
     latest = _latest_release_tag()
-    # Only claim an update when we know the installed version — `cur or "(unknown)"`
-    # for display would otherwise be parsed as (0,) and flag every latest as newer.
+    # 只有当我们知道已安装版本时才声称有更新——否则 `cur or "(unknown)"`
+    # 会被解析为 (0,)，导致每个最新版本都被标记为更新版本
     newer = bool(cur and latest and _version_tuple(latest) > _version_tuple(cur))
     cur_display = cur or "(unknown)"
     doc_url = _snap_linux_headless_doc_url()
@@ -806,7 +568,7 @@ def run_doctor():
         else:
             print(f"        {conn['name']} — active page: (no real page)")
     row("Browser Use cloud auth", cloud_auth, auth_state.get("source") or auth_state.get("reason") or "optional: web-agent auth login")
-    # Core health = chrome + daemon. Cloud auth is optional.
+    # 核心健康检查 = chrome + daemon。云认证是可选的。
     return 0 if (chrome and daemon) else 1
 
 
@@ -824,13 +586,12 @@ def _prompt_yes(question, default_yes=True, yes=False):
 
 
 def run_update(yes=False):
-    """Pull the latest version and (after prompt) restart the daemon so it picks up changed code.
-
-    Exit 0 on success, non-zero on failure."""
-    import subprocess, sys
+    """拉取最新版本并（在提示后）重启 daemon 以加载更改的代码。
+    
+    成功时返回 0，失败时返回非零值。"""
     cur, latest, newer = check_for_update()
-    # Only short-circuit as "up to date" when we actually know the installed
-    # version. Otherwise `newer=False` just means "couldn't compare" — proceed.
+    # 只有当我们确实知道已安装的版本时，才以"已是最新"为由提前返回。
+    # 否则 `newer=False` 只意味着"无法比较"——继续执行更新流程。
     if cur and latest and not newer:
         print(f"web-agent is up to date ({cur}).")
         return 0
@@ -863,7 +624,7 @@ def run_update(yes=False):
         print("unknown install mode; can't auto-update.", file=sys.stderr)
         return 1
 
-    # Invalidate banner/tag cache so the new version doesn't keep nagging.
+    # 使横幅/标签缓存失效，这样新版本就不会继续提示更新了。
     cache = _cache_read()
     cache.pop("banner_shown_on", None)
     _cache_write(cache)
