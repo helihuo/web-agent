@@ -1,2 +1,2 @@
-"""Web Agent core package."""
+"""Web Agent 核心包。"""
 

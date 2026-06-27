@@ -27,7 +27,7 @@ Paste the setup prompt into your coding agent.
 Paste into Claude Code or Codex:
 
 ```text
-Install or upgrade web-agent to the latest stable version with uv using Python 3.12, register the skill from `web-agent skill`, and connect it to my browser. Follow https://github.com/helihuo/web-agent/blob/main/install.md if setup or connection fails.
+Install or upgrade web-agent to the latest stable version with uv using Python 3.12, register the skill from `web-agent skill`, and connect it to my browser. Follow install.md if setup or connection fails.
 ```
 
 The agent will open `chrome://inspect/#remote-debugging`. Tick the checkbox so the agent can connect to your browser:
@@ -42,15 +42,15 @@ See [agent-workspace/domain-skills/](agent-workspace/domain-skills/) for example
 
 <br />
 
-## Architecture (\~1k lines across 4 core files)
+## Architecture (~10 core files)
 
 - `install.md` — first-time install and browser bootstrap
 - `SKILL.md` — day-to-day usage
-- `src/web_agent/` — protected core package
+- `src/web_agent/` — protected core package with 4 main user-facing files (`admin.py`, `daemon.py`, `helpers.py`, `run.py`) and 6 internal modules (`__init__.py`, `_ipc.py`, `auth.py`, `cdp_client.py`, `paths.py`, `telemetry.py`)
 - `${XDG_CONFIG_HOME:-~/.config}/web-agent/agent-workspace/agent_helpers.py` — helper code the agent edits
 - `${XDG_CONFIG_HOME:-~/.config}/web-agent/agent-workspace/domain-skills/` — reusable site-specific skills the agent edits
 
-Plain `web-agent` helper calls attach to the running Chrome/Chromium CDP endpoint. For isolated automation, launch Chrome yourself with `--remote-debugging-port` and pass `BU_CDP_URL`, or use a Browser Use cloud browser.
+Plain `web-agent` helper calls attach to the running Chrome/Chromium CDP endpoint. For isolated automation, launch Chrome yourself with `--remote-debugging-port` and pass `BU_CDP_URL`.
 
 ## Development
 

@@ -20,5 +20,12 @@ An agent operating the harness only edits inside `agent-workspace/`:
 - `agent_helpers.py` — task-specific browser helpers the agent adds
 - `domain-skills/` — skills the agent writes and reads
 
+## Internal modules
+- `_ipc.py` — IPC communication layer, handles inter-process communication between the daemon and helpers
+- `auth.py` — Browser Use cloud authentication, manages API keys and login state
+- `cdp_client.py` — CDP WebSocket client, wraps the Chrome DevTools Protocol connection
+- `paths.py` — Path and directory management, provides utilities for config directories, runtime directories, etc.
+- `telemetry.py` — Anonymous telemetry, collects usage statistics (can be disabled)
+
 # Contributing
 Consider what is really needed. Prefer the smallest diff that fixes the bug.

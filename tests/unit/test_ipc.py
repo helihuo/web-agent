@@ -22,15 +22,15 @@ def test_tmp_stem_uses_name_in_shared_tmp_dir(monkeypatch):
     assert ipc._tmp_stem("work") == "wa-work"
 
 
-# --- identify(): ping payload sanitation ---
+# --- identify()：ping 负载清理 ---
 
 class _FakeConn:
     def close(self): pass
 
 
 def _patch_identify_response(monkeypatch, response):
-    """Stub connect() and request() so identify() sees `response` as the JSON
-    parsed from the daemon's reply, exactly as it would arrive over the wire."""
+    """桩化 connect() 和 request()，使 identify() 看到的 `response` 与
+    从守护进程回复中解析的 JSON 完全一致，就像从网络接收到的一样。"""
     monkeypatch.setattr(ipc, "connect", lambda name, timeout=1.0: (_FakeConn(), "tok"))
     monkeypatch.setattr(ipc, "request", lambda conn, tok, msg: response)
 
@@ -42,34 +42,34 @@ def test_identify_returns_pid_for_well_formed_ping_reply(monkeypatch):
 
 
 def test_identify_rejects_boolean_pid(monkeypatch):
-    """isinstance(True, int) is True in Python; a hostile or buggy daemon
-    that replies {"pid": True} would otherwise yield PID 1 (init on POSIX),
-    which os.kill(1, SIGTERM) would target. Reject it explicitly."""
+    """isinstance(True, int) 在 Python 中为 True；恶意或有缺陷的守护进程
+    回复 {"pid": True} 时会得到 PID 1（POSIX 上的 init 进程），
+    os.kill(1, SIGTERM) 会命中它。必须显式拒绝。"""
     _patch_identify_response(monkeypatch, {"pong": True, "pid": True})
 
     assert ipc.identify("default", timeout=0.0) is None
 
 
 def test_identify_rejects_boolean_false_pid(monkeypatch):
-    """False is also an int subclass and would yield PID 0."""
+    """False 也是 int 的子类，会得到 PID 0。"""
     _patch_identify_response(monkeypatch, {"pong": True, "pid": False})
 
     assert ipc.identify("default", timeout=0.0) is None
 
 
 def test_identify_returns_none_when_pid_field_missing(monkeypatch):
-    """Pre-upgrade daemons reply {pong: True} only — no pid. identify must
-    return None so callers know they have no verified PID to signal, while
-    still letting alive-checks via ipc.ping() succeed."""
+    """升级前的守护进程只回复 {pong: True} —— 没有 pid。identify 必须
+    返回 None，让调用者知道没有已验证的 PID 可以发送信号，同时仍允许
+    通过 ipc.ping() 进行存活检查。"""
     _patch_identify_response(monkeypatch, {"pong": True})
 
     assert ipc.identify("default", timeout=0.0) is None
 
 
 def test_identify_handles_non_dict_ping_payload(monkeypatch):
-    """request() can deserialize any valid JSON value. A stale or hostile
-    endpoint replying with a list / scalar / null would crash a naive
-    resp.get() with AttributeError; identify must absorb that and return None."""
+    """request() 可以反序列化任何有效的 JSON 值。残留或恶意的端点
+    回复列表/标量/null 会导致朴素的 resp.get() 抛出 AttributeError；
+    identify 必须吸收这种情况并返回 None。"""
     for payload in ([1, 2, 3], "hello", 42, None):
         _patch_identify_response(monkeypatch, payload)
         assert ipc.identify("default", timeout=0.0) is None, (
@@ -84,10 +84,9 @@ def test_identify_returns_none_when_pong_is_not_true(monkeypatch):
 
 
 def test_identify_rejects_zero_and_negative_pids(monkeypatch):
-    """os.kill semantics on POSIX: pid=0 signals every process in the calling
-    process group; pid=-1 signals every process the caller can; pid<-1 signals
-    the corresponding process group. None of these are valid daemon PIDs and
-    forwarding any of them to os.kill would be catastrophic."""
+    """os.kill 在 POSIX 上的语义：pid=0 向调用进程组中的所有进程发送信号；
+    pid=-1 向调用者有权限的所有进程发送信号；pid<-1 向对应的进程组发送信号。
+    这些都不是有效的守护进程 PID，将任何值转发给 os.kill 都会造成灾难性后果。"""
     for bad_pid in (0, -1, -42, -99999):
         _patch_identify_response(monkeypatch, {"pong": True, "pid": bad_pid})
         assert ipc.identify("default", timeout=0.0) is None, (
@@ -95,7 +94,7 @@ def test_identify_rejects_zero_and_negative_pids(monkeypatch):
         )
 
 
-# --- ping(): same payload sanitation ---
+# --- ping()：相同的负载清理 ---
 
 def _patch_ping_response(monkeypatch, response):
     monkeypatch.setattr(ipc, "connect", lambda name, timeout=1.0: (_FakeConn(), "tok"))
@@ -109,10 +108,10 @@ def test_ping_returns_true_for_well_formed_pong(monkeypatch):
 
 
 def test_ping_handles_non_dict_payload(monkeypatch):
-    """Same regression class as identify(): if a stale or hostile endpoint
-    replies with a list / scalar / null, ping() must return False rather than
-    raising AttributeError on resp.get(). restart_daemon() now calls ping() on
-    the fallback path, so an unhandled raise here would abort cleanup."""
+    """与 identify() 相同的回归类别：如果残留或恶意的端点
+    回复列表/标量/null，ping() 必须返回 False 而不是在 resp.get() 上
+    抛出 AttributeError。restart_daemon() 现在在回退路径上调用 ping()，
+    因此此处未处理的异常会中止清理操作。"""
     for payload in ([1, 2, 3], "hello", 42, None):
         _patch_ping_response(monkeypatch, payload)
         assert ipc.ping("default", timeout=0.0) is False, (

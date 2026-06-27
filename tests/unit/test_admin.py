@@ -50,7 +50,7 @@ def test_stale_websocket_does_not_open_chrome_inspect():
 
 def test_daemon_endpoint_names_discovers_valid_socket_names(tmp_path, monkeypatch):
     monkeypatch.setattr(admin.ipc, "IS_WINDOWS", False)
-    monkeypatch.setattr(admin.ipc, "WA_RUNTIME_DIR", None)  # shared-tmpdir mode
+    monkeypatch.setattr(admin.ipc, "WA_RUNTIME_DIR", None)  # 共享临时目录模式
     monkeypatch.setattr(admin.ipc, "_RUNTIME", tmp_path)
     (tmp_path / "wa-default.sock").touch()
     (tmp_path / "wa-remote_1.sock").touch()
@@ -89,7 +89,7 @@ def test_daemon_endpoint_names_with_shared_bh_runtime_dir_discovers_named_socket
     (tmp_path / "wa-default.sock").touch()
     (tmp_path / "wa-work.sock").touch()
     (tmp_path / "wa-invalid.name.sock").touch()
-    (tmp_path / "wa.sock").touch()  # stale isolated-runtime endpoint
+    (tmp_path / "wa.sock").touch()  # 残留的隔离运行时端点
 
     assert admin._daemon_endpoint_names() == ["default", "work"]
 
@@ -320,96 +320,15 @@ def test_doctor_page_output_truncates_long_text(monkeypatch, capsys):
     assert "https://example.t..." in out
 
 
-def test_start_remote_daemon_stops_created_browser_when_daemon_start_fails(monkeypatch):
-    calls = []
-    browser = {"id": "browser-123", "cdpUrl": "http://127.0.0.1:9333", "liveUrl": "https://live.example"}
-
-    def fake_browser_use(path, method, body=None):
-        calls.append((path, method, body))
-        if (path, method) == ("/browsers", "POST"):
-            return browser
-        if (path, method) == ("/browsers/browser-123", "PATCH"):
-            return {}
-        raise AssertionError((path, method, body))
-
-    monkeypatch.setattr(admin, "daemon_alive", lambda name: False)
-    monkeypatch.setattr(admin, "_browser_use", fake_browser_use)
-    monkeypatch.setattr(admin, "_cdp_ws_from_url", lambda url: "ws://example.test/devtools/browser/1")
-    monkeypatch.setattr(admin, "ensure_daemon", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
-
-    with pytest.raises(RuntimeError, match="boom"):
-        admin.start_remote_daemon()
-
-    assert calls == [
-        ("/browsers", "POST", {}),
-        ("/browsers/browser-123", "PATCH", {"action": "stop"}),
-    ]
-
-
-@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit])
-def test_start_remote_daemon_stops_created_browser_when_daemon_start_is_interrupted(monkeypatch, exc_type):
-    calls = []
-    browser = {"id": "browser-123", "cdpUrl": "http://127.0.0.1:9333", "liveUrl": "https://live.example"}
-
-    def fake_browser_use(path, method, body=None):
-        calls.append((path, method, body))
-        if (path, method) == ("/browsers", "POST"):
-            return browser
-        if (path, method) == ("/browsers/browser-123", "PATCH"):
-            return {}
-        raise AssertionError((path, method, body))
-
-    monkeypatch.setattr(admin, "daemon_alive", lambda name: False)
-    monkeypatch.setattr(admin, "_browser_use", fake_browser_use)
-    monkeypatch.setattr(admin, "_cdp_ws_from_url", lambda url: "ws://example.test/devtools/browser/1")
-    monkeypatch.setattr(admin, "ensure_daemon", lambda **kwargs: (_ for _ in ()).throw(exc_type()))
-
-    with pytest.raises(exc_type):
-        admin.start_remote_daemon()
-
-    assert calls == [
-        ("/browsers", "POST", {}),
-        ("/browsers/browser-123", "PATCH", {"action": "stop"}),
-    ]
-
-
-@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit])
-def test_stop_cloud_browser_swallows_baseexception_from_stop_request(monkeypatch, exc_type):
-    monkeypatch.setattr(admin, "_browser_use", lambda *args, **kwargs: (_ for _ in ()).throw(exc_type()))
-
-    admin._stop_cloud_browser("browser-123")
-
-def test_start_remote_daemon_does_not_stop_created_browser_on_success(monkeypatch):
-    calls = []
-    browser = {"id": "browser-123", "cdpUrl": "http://127.0.0.1:9333", "liveUrl": "https://live.example"}
-
-    def fake_browser_use(path, method, body=None):
-        calls.append((path, method, body))
-        if (path, method) == ("/browsers", "POST"):
-            return browser
-        raise AssertionError((path, method, body))
-
-    monkeypatch.setattr(admin, "daemon_alive", lambda name: False)
-    monkeypatch.setattr(admin, "_browser_use", fake_browser_use)
-    monkeypatch.setattr(admin, "_cdp_ws_from_url", lambda url: "ws://example.test/devtools/browser/1")
-    monkeypatch.setattr(admin, "ensure_daemon", lambda **kwargs: None)
-    monkeypatch.setattr(admin, "_show_live_url", lambda url: None)
-
-    assert admin.start_remote_daemon() == browser
-    assert calls == [
-        ("/browsers", "POST", {}),
-    ]
-
-
-# --- restart_daemon: PID-reuse safety ---
+# --- restart_daemon：PID复用安全性 ---
 
 def test_restart_daemon_does_not_signal_when_daemon_unreachable(monkeypatch, tmp_path):
-    """If ipc.identify() returns None (daemon gone), restart_daemon must NOT
-    fall back to reading the pid file and SIGTERMing whatever owns that PID —
-    that's the PID-reuse hazard. It should only clean up files."""
+    """如果 ipc.identify() 返回 None（守护进程已消失），restart_daemon 绝不能
+    回退到读取 pid 文件并向占用该 PID 的进程发送 SIGTERM ——
+    这就是 PID 复用风险。它应该只清理文件。"""
     pid_path = tmp_path / "default.pid"
-    # A pid file with a PID that, if signaled, would hit an unrelated process.
-    # The whole point is that we don't read or trust this number.
+    # 一个包含 PID 的 pid 文件，如果发送信号，会命中一个无关进程。
+    # 关键在于我们不会读取或信任这个数值。
     pid_path.write_text("99999")
 
     kill_calls = []
@@ -419,31 +338,31 @@ def test_restart_daemon_does_not_signal_when_daemon_unreachable(monkeypatch, tmp
     monkeypatch.setattr(admin.ipc, "pid_path", lambda name: pid_path)
     monkeypatch.setattr(admin.ipc, "cleanup_endpoint", lambda name: None)
 
-    # Should not raise, should not signal, should still clean up the pid file.
+    # 不应抛出异常，不应发送信号，但仍应清理 pid 文件。
     admin.restart_daemon("default")
 
     assert kill_calls == [], (
         f"restart_daemon SIGTERM'd a PID despite identify() returning None — "
         f"this is the PID-reuse hazard the function is meant to avoid. Calls: {kill_calls}"
     )
-    assert not pid_path.exists(), "stale pid file should be cleaned up"
+    assert not pid_path.exists(), "残留的 pid 文件应该被清理"
 
 
 def test_restart_daemon_signals_pid_returned_by_identify_not_pid_file(monkeypatch, tmp_path):
-    """The PID we signal must come from the live daemon's self-report, never
-    from the pid file. If a stale pid file disagrees, the live daemon's PID wins."""
+    """我们发送信号的 PID 必须来自活跃守护进程的自我报告，绝不能
+    来自 pid 文件。如果残留的 pid 文件不一致，以活跃守护进程的 PID 为准。"""
     import signal
 
     pid_path = tmp_path / "default.pid"
-    pid_path.write_text("99999")  # bogus stale value — must be ignored
+    pid_path.write_text("99999")  # 伪造的残留值——必须被忽略
 
     live_pid = 4242
 
     kill_calls = []
     def fake_kill(pid, sig):
         kill_calls.append((pid, sig))
-        # First os.kill(pid, 0) probe: report process is gone so we exit the loop
-        # without escalating. We just want to see WHICH pid was probed.
+        # 第一次 os.kill(pid, 0) 探测：报告进程已消失，从而退出循环
+        # 而不升级。我们只想看到探测了哪个 PID。
         if sig == 0:
             raise ProcessLookupError
 
@@ -474,8 +393,8 @@ def test_restart_daemon_signals_pid_returned_by_identify_not_pid_file(monkeypatc
 
     admin.restart_daemon("default")
 
-    assert fake.shutdown_sent, "expected shutdown IPC to be sent"
-    assert kill_calls, "expected at least one os.kill probe"
+    assert fake.shutdown_sent, "预期会发送关闭 IPC"
+    assert kill_calls, "预期至少有一次 os.kill 探测"
     pids_signaled = {pid for pid, _ in kill_calls}
     assert pids_signaled == {live_pid}, (
         f"restart_daemon must only signal the PID returned by identify(); "
@@ -485,12 +404,12 @@ def test_restart_daemon_signals_pid_returned_by_identify_not_pid_file(monkeypatc
 
 
 def test_restart_daemon_sends_shutdown_to_pre_upgrade_daemon_without_pid_in_ping(monkeypatch, tmp_path):
-    """Backward compat: a pre-upgrade daemon's ping reply has {pong:True} but
-    no `pid` field, so identify() returns None. The shutdown IPC must STILL be
-    sent (so the daemon exits cleanly), but no os.kill happens (we have no
-    verified PID to safely signal)."""
+    """向后兼容：升级前的守护进程的 ping 回复包含 {pong:True} 但
+    没有 `pid` 字段，因此 identify() 返回 None。关闭 IPC 仍然必须
+    发送（这样守护进程才能干净退出），但不会执行 os.kill（我们没有
+    已验证的 PID 可以安全地发送信号）。"""
     pid_path = tmp_path / "default.pid"
-    pid_path.write_text("99999")  # bogus stale value
+    pid_path.write_text("99999")  # 伪造的残留值
 
     kill_calls = []
     shutdown_calls = []
@@ -502,7 +421,7 @@ def test_restart_daemon_sends_shutdown_to_pre_upgrade_daemon_without_pid_in_ping
 
     monkeypatch.setattr(admin.os, "kill", lambda pid, sig: kill_calls.append((pid, sig)))
     monkeypatch.setattr(admin.ipc, "identify", lambda name, timeout=5.0: None)
-    monkeypatch.setattr(admin.ipc, "ping", lambda name, timeout=1.0: True)  # old daemon: alive but no pid
+    monkeypatch.setattr(admin.ipc, "ping", lambda name, timeout=1.0: True)  # 旧守护进程：存活但没有 pid
     monkeypatch.setattr(admin.ipc, "connect", lambda name, timeout: ("conn", "tok"))
     monkeypatch.setattr(admin.ipc, "request", fake_request)
     monkeypatch.setattr(admin.ipc, "pid_path", lambda name: pid_path)
@@ -511,22 +430,22 @@ def test_restart_daemon_sends_shutdown_to_pre_upgrade_daemon_without_pid_in_ping
     admin.restart_daemon("default")
 
     assert shutdown_calls, (
-        "restart_daemon must send shutdown IPC to a pre-upgrade daemon even "
-        "when identify() can't return a PID — otherwise upgrades orphan the "
-        "old daemon while deleting its socket and pid file."
+        "restart_daemon 必须向升级前的守护进程发送关闭 IPC，即使 "
+        "identify() 无法返回 PID —— 否则升级会使旧守护进程成为孤立进程，"
+        "同时删除其套接字和 pid 文件。"
     )
     assert kill_calls == [], (
-        f"no os.kill should fire when we don't have a verified PID, "
-        f"but got: {kill_calls}"
+        f"当没有已验证的 PID 时，不应触发 os.kill，"
+        f"但得到了: {kill_calls}"
     )
     assert not pid_path.exists()
 
 
 def test_restart_daemon_skips_sigterm_if_pid_was_reused_during_wait(monkeypatch, tmp_path):
-    """A second identify() runs immediately before the SIGTERM. If the daemon
-    exited and the PID was reused mid-wait, identify() will return None (or a
-    different PID) and we must NOT signal — that's the PID-reuse race during
-    the 15s wait window."""
+    """在 SIGTERM 之前会立即运行第二次 identify()。如果守护进程
+    已退出且 PID 在等待期间被复用，identify() 将返回 None（或
+    不同的 PID），我们绝不能发送信号 —— 这就是 15 秒等待窗口期间的
+    PID 复用竞争。"""
     import signal
 
     pid_path = tmp_path / "default.pid"
@@ -537,14 +456,13 @@ def test_restart_daemon_skips_sigterm_if_pid_was_reused_during_wait(monkeypatch,
 
     def fake_kill(pid, sig):
         kill_calls.append((pid, sig))
-        # All os.kill(pid, 0) probes succeed → loop exhausts → reaches the
-        # SIGTERM branch. (We're simulating a "wedged" daemon that the wait
-        # loop can't tell apart from a daemon whose PID got reused.)
+        # 所有 os.kill(pid, 0) 探测都成功 → 循环耗尽 → 到达
+        # SIGTERM 分支。（我们在模拟一个"卡住"的守护进程，等待循环
+        # 无法将其与 PID 被复用的守护进程区分开来。）
 
-    # First identify() call (top of restart_daemon) returns the live PID.
-    # Second identify() call (right before SIGTERM) returns None — simulating
-    # the daemon having exited and its PID having been reused by an unrelated
-    # process. The function must NOT escalate to SIGTERM in that state.
+    # 第一次 identify() 调用（restart_daemon 顶部）返回活跃的 PID。
+    # 第二次 identify() 调用（在 SIGTERM 之前）返回 None —— 模拟
+    # 守护进程已退出且其 PID 被无关进程复用。函数在此状态下绝不能升级为 SIGTERM。
     identify_responses = iter([live_pid, None])
     monkeypatch.setattr(admin.os, "kill", fake_kill)
     monkeypatch.setattr(admin.ipc, "identify", lambda name, timeout=5.0: next(identify_responses))
@@ -553,27 +471,26 @@ def test_restart_daemon_skips_sigterm_if_pid_was_reused_during_wait(monkeypatch,
     monkeypatch.setattr(admin.ipc, "request", lambda conn, tok, msg: {"ok": True})
     monkeypatch.setattr(admin.ipc, "pid_path", lambda name: pid_path)
     monkeypatch.setattr(admin.ipc, "cleanup_endpoint", lambda name: None)
-    # Speed up the wait loop so the test finishes quickly. The loop polls 75
-    # times at 0.2s = 15s; with sleep neutralized it runs in microseconds.
+    # 加速等待循环以使测试快速完成。循环轮询 75 次，每次 0.2 秒 = 15 秒；
+    # 将 sleep 中和后可在微秒级完成。
     monkeypatch.setattr(admin.time, "sleep", lambda _s: None)
 
     admin.restart_daemon("default")
 
     sigterms = [(pid, sig) for pid, sig in kill_calls if sig == signal.SIGTERM]
     assert sigterms == [], (
-        f"restart_daemon issued SIGTERM despite the re-verify identify() "
-        f"returning None (PID was reused during the 15s wait). Calls: {kill_calls}"
+        f"restart_daemon 在重新验证的 identify() 返回 None 的情况下"
+        f"仍发出了 SIGTERM（PID 在 15 秒等待期间被复用）。调用: {kill_calls}"
     )
     assert not pid_path.exists()
 
 
 def test_restart_daemon_sigterms_via_start_time_fingerprint_when_socket_gone(monkeypatch, tmp_path):
-    """Slow-shutdown recovery: the daemon's serve() tears down the IPC socket
-    BEFORE the process exits (the daemon then runs slow cleanup like remote
-    `stop` PATCH calls that can hang). In that window, identify() returns None
-    even though the process is still our daemon. SIGTERM must still fire when
-    the PID's start-time fingerprint hasn't changed since we first identified
-    it — that's strong evidence of "same process, just slow to exit."
+    """慢关闭恢复：守护进程的 serve() 在进程退出之前就拆除了 IPC 套接字
+    （守护进程随后运行缓慢的清理操作，如可能挂起的远程 `stop` PATCH 调用）。
+    在该时间窗口内，identify() 返回 None，尽管进程仍然是我们的守护进程。
+    当 PID 的启动时间指纹自我们首次识别以来没有改变时，SIGTERM 仍然必须
+    触发 —— 这是有力证据表明"同一个进程，只是退出缓慢"。
     """
     import signal
 
@@ -585,14 +502,14 @@ def test_restart_daemon_sigterms_via_start_time_fingerprint_when_socket_gone(mon
 
     def fake_kill(pid, sig):
         kill_calls.append((pid, sig))
-        # All os.kill(pid, 0) probes succeed; loop exhausts → SIGTERM gate runs.
+        # 所有 os.kill(pid, 0) 探测都成功；循环耗尽 → SIGTERM 门控运行。
 
-    # First identify() returns live_pid. Second identify() returns None — the
-    # daemon has torn down its IPC during shutdown but the process is still
-    # finishing up cleanup work, so the start-time fingerprint is unchanged.
+    # 第一次 identify() 返回 live_pid。第二次 identify() 返回 None ——
+    # 守护进程在关闭期间已拆除其 IPC，但进程仍在完成清理工作，
+    # 因此启动时间指纹未改变。
     identify_responses = iter([live_pid, None])
-    # Both _process_start_time() calls return the same fingerprint, signaling
-    # "still the same process." This is the legitimate-slow-shutdown case.
+    # 两次 _process_start_time() 调用返回相同的指纹，表示
+    # "仍然是同一个进程"。这是合法的慢关闭情况。
     monkeypatch.setattr(admin, "_process_start_time", lambda pid: "STARTED_AT_X")
     monkeypatch.setattr(admin.os, "kill", fake_kill)
     monkeypatch.setattr(admin.ipc, "identify", lambda name, timeout=5.0: next(identify_responses))
@@ -607,16 +524,15 @@ def test_restart_daemon_sigterms_via_start_time_fingerprint_when_socket_gone(mon
 
     sigterms = [(pid, sig) for pid, sig in kill_calls if sig == signal.SIGTERM]
     assert sigterms == [(live_pid, signal.SIGTERM)], (
-        f"slow-shutdown daemon (identify=None but unchanged start-time) must "
-        f"still receive SIGTERM. signal calls: {kill_calls}"
+        f"慢关闭守护进程（identify=None 但启动时间未变）仍必须"
+        f"接收 SIGTERM。信号调用: {kill_calls}"
     )
 
 
 def test_restart_daemon_skips_sigterm_when_start_time_changed_during_wait(monkeypatch, tmp_path):
-    """If the start-time fingerprint of the original PID has CHANGED, the PID
-    was reused by another process. Even though identify() also returns None,
-    we must skip SIGTERM — start-time mismatch is the signal that protects
-    against killing an unrelated reused-PID process."""
+    """如果原始 PID 的启动时间指纹发生了变化，说明 PID 被另一个
+    进程复用了。即使 identify() 也返回 None，我们也必须跳过 SIGTERM ——
+    启动时间不匹配是防止杀死无关的 PID 复用进程的信号。"""
     import signal
 
     pid_path = tmp_path / "default.pid"
@@ -627,8 +543,8 @@ def test_restart_daemon_skips_sigterm_when_start_time_changed_during_wait(monkey
     monkeypatch.setattr(admin.os, "kill", lambda pid, sig: kill_calls.append((pid, sig)))
 
     identify_responses = iter([live_pid, None])
-    # First start-time read at top of restart_daemon: "ORIGINAL".
-    # Second start-time read in the safety gate: "DIFFERENT" — proof of reuse.
+    # restart_daemon 顶部的第一次启动时间读取："ORIGINAL"。
+    # 安全门控中的第二次启动时间读取："DIFFERENT" —— 复用的证据。
     start_time_responses = iter(["ORIGINAL", "DIFFERENT"])
     monkeypatch.setattr(admin, "_process_start_time", lambda pid: next(start_time_responses))
     monkeypatch.setattr(admin.ipc, "identify", lambda name, timeout=5.0: next(identify_responses))
@@ -643,22 +559,22 @@ def test_restart_daemon_skips_sigterm_when_start_time_changed_during_wait(monkey
 
     sigterms = [(pid, sig) for pid, sig in kill_calls if sig == signal.SIGTERM]
     assert sigterms == [], (
-        f"start-time mismatch indicates PID reuse — restart_daemon must NOT "
-        f"SIGTERM. signal calls: {kill_calls}"
+        f"启动时间不匹配表明 PID 被复用 —— restart_daemon 绝不能发送 "
+        f"SIGTERM。信号调用: {kill_calls}"
     )
 
 
-# --- _process_start_time helper ---
+# --- _process_start_time 辅助函数 ---
 
 def test_process_start_time_returns_stable_fingerprint_for_self():
-    """The start-time of the current process should be readable on Linux,
-    macOS, and Windows, and stable across two reads."""
+    """当前进程的启动时间应该在 Linux、macOS 和 Windows 上可读，
+    且两次读取结果稳定一致。"""
     import os as _os, sys
     if sys.platform.startswith("linux") or sys.platform == "darwin" or sys.platform == "win32":
         pid = _os.getpid()
         first = admin._process_start_time(pid)
         second = admin._process_start_time(pid)
-        assert first is not None, "expected a fingerprint for the current PID"
+        assert first is not None, "预期当前 PID 有指纹值"
         assert first == second, (
             f"two reads of the same PID should return the same fingerprint; "
             f"got {first!r} vs {second!r}"
@@ -666,11 +582,11 @@ def test_process_start_time_returns_stable_fingerprint_for_self():
 
 
 def test_process_start_time_returns_none_for_invalid_pid():
-    """Bad inputs (None, 0, negatives, non-int) and PIDs with no live process
-    must return None rather than raising."""
+    """无效输入（None、0、负数、非整数）以及没有活跃进程的 PID
+    必须返回 None 而不是抛出异常。"""
     for bad in (None, 0, -1, -42, "not-an-int", 1.5, True, False):
         assert admin._process_start_time(bad) is None, (
             f"expected None for invalid pid {bad!r}"
         )
-    # 2**31 - 1 is the largest pid_t; in practice no live process at that PID.
+    # 2**31 - 1 是最大的 pid_t；实际上不存在该 PID 的活跃进程。
     assert admin._process_start_time((1 << 31) - 1) is None

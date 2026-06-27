@@ -41,27 +41,6 @@ In Chrome:
 
 The checkbox and popup require the user.
 
-## Cloud Browsers
-
-Cloud is optional. Local Chrome does not need a Browser Use API key.
-
-Use any short made-up name; `r7k2` below is just a placeholder.
-
-```bash
-web-agent auth login
-web-agent <<'PY'
-start_remote_daemon("r7k2")
-PY
-```
-
-Then use it by name:
-
-```bash
-BU_NAME=r7k2 web-agent <<'PY'
-print(page_info())
-PY
-```
-
 ## If Still Broken
 
 ```bash
@@ -70,7 +49,7 @@ web-agent --doctor
 
 Use the output:
 
-- `chrome running` FAIL: ask the user to open Chrome, or use isolated/cloud browser.
+- `chrome running` FAIL: ask the user to open Chrome.
 - `daemon alive` FAIL: Chrome remote debugging permission is missing, Chrome is closed, or the CDP endpoint is not reachable.
 - update available: run `web-agent --update -y` when you decide to upgrade.
 

@@ -75,7 +75,7 @@ Ask the user to tick "Allow remote debugging for this browser instance" and clic
 ## Design Constraints
 
 - Coordinate clicks default. CDP mouse events pass through iframes/shadow/cross-origin at the compositor level.
-- Keep the connection model simple: use the default daemon, `BU_NAME`, `BU_CDP_URL`, `BU_CDP_WS`, or `start_remote_daemon(...)`.
+- Keep the connection model simple: use the default daemon, `BU_NAME`, `BU_CDP_URL`, or `BU_CDP_WS`.
 - Core helpers stay short. Put task-specific helper additions in `$WA_AGENT_WORKSPACE/agent_helpers.py`.
 
 ## Gotchas
@@ -85,7 +85,6 @@ Ask the user to tick "Allow remote debugging for this browser instance" and clic
 - Omnibox popups are not real work tabs.
 - CDP target order is not Chrome's visible tab-strip order.
 - `BU_CDP_URL` is an HTTP DevTools endpoint; the daemon resolves it to WebSocket.
-- Ask before leaving cloud browsers running; stop them with `stop_remote_daemon(name)` or `PATCH /browsers/{id} {"action":"stop"}`.
 
 ## Domain Skills
 

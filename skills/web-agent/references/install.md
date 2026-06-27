@@ -32,7 +32,7 @@ If an old user-installed `browser` or `browser-use` skill is being picked instea
 
 ## Connect to a browser
 
-`web-agent` attaches to a Chrome you already have running, or to a Browser Use cloud browser. Quick check:
+`web-agent` attaches to a Chrome you already have running. Quick check:
 
 ```bash
 web-agent <<'PY'

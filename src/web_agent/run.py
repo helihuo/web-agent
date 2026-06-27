@@ -136,8 +136,8 @@ def main():
     else:
         sys.exit(USAGE)
     print_update_banner()
-    # 确保 daemon 正在运行
-    if not daemon_alive() and not _local_chrome_listening():
+    # 确保 daemon 正在运行（无论 Chrome 是否监听，daemon 都必须启动）
+    if not daemon_alive():
         ensure_daemon()
     exec(code, globals())
 

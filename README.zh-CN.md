@@ -4,9 +4,9 @@
 
 🌐 [English](./README.md) | **中文** 
 
-通过一个轻量、可编辑的 CDP 工具，将 LLM 直接连接到你的真实浏览器。适用于需要**完全自由**的浏览器任务。
+通过一个轻量、可编辑的 CDP 工具链，将 LLM 直接连接到你的真实浏览器。适用于需要**完全自由**的浏览器任务。
 
-一个连接到 Chrome 的 websocket，中间没有任何阻隔。代理在执行过程中会编写缺失的内容。工具在每次运行时都会自我改进。
+一个连接到 Chrome 的 websocket，中间没有任何阻隔。代理在执行过程中会编写缺失的内容。工具链在每次运行时都会自我改进。
 
 将安装提示粘贴到你的编程代理中。
 
@@ -27,7 +27,7 @@
 粘贴到 Claude Code 或 Codex 中：
 
 ```text
-Install or upgrade web-agent to the latest stable version with uv using Python 3.12, register the skill from `web-agent skill`, and connect it to my browser. Follow web-agent/install.md if setup or connection fails.
+Install or upgrade web-agent to the latest stable version with uv using Python 3.12, register the skill from `web-agent skill`, and connect it to my browser. Follow install.md if setup or connection fails.
 ```
 
 代理将打开 `chrome://inspect/#remote-debugging`。勾选复选框以便代理可以连接到你的浏览器：
@@ -42,15 +42,15 @@ Install or upgrade web-agent to the latest stable version with uv using Python 3
 
 <br />
 
-## 架构（4 个核心文件约 1000 行代码）
+## 架构（约 10 个核心文件）
 
 - `install.md` — 首次安装和浏览器引导
 - `SKILL.md` — 日常使用
-- `src/web_agent/` — 受保护的核心包
+- `src/web_agent/` — 受保护的核心包，包含 4 个主要面向用户的文件（`admin.py`、`daemon.py`、`helpers.py`、`run.py`）和 6 个内部模块（`__init__.py`、`_ipc.py`、`auth.py`、`cdp_client.py`、`paths.py`、`telemetry.py`）
 - `${XDG_CONFIG_HOME:-~/.config}/web-agent/agent-workspace/agent_helpers.py` — 代理编辑的辅助代码
 - `${XDG_CONFIG_HOME:-~/.config}/web-agent/agent-workspace/domain-skills/` — 代理编辑的可复用站点特定技能
 
-普通的 `web-agent` 辅助调用会附加到正在运行的 Chrome/Chromium CDP 端点。对于隔离的自动化，你可以使用 `--remote-debugging-port` 启动 Chrome 并传递 `BU_CDP_URL`，或使用 Browser Use 云浏览器。
+普通的 `web-agent` 辅助调用会附加到正在运行的 Chrome/Chromium CDP 端点。对于隔离的自动化，你可以使用 `--remote-debugging-port` 启动 Chrome 并传递 `BU_CDP_URL`。
 
 ## 开发
 
@@ -68,7 +68,7 @@ PY
 
 欢迎 PR 和改进。最好的帮助方式：**为 agent-workspace/domain-skills/ 贡献一个新的领域技能**，针对你经常使用的站点或任务（LinkedIn 推广、在 Amazon 上订购、报销费用等）。每个技能都教会代理选择器、流程和边缘情况，否则它必须重新发现这些内容。
 
-- **技能由工具编写，而不是由你编写。** 只需使用代理运行你的任务——当它发现一些非显而易见的内容时，它会自行归档技能（参见 [SKILL.md](SKILL.md)）。请不要手动编写技能文件；代理生成的文件反映了浏览器中实际工作的内容。
+- **技能由工具链编写，而不是由你编写。** 只需使用代理运行你的任务——当它发现一些非显而易见的内容时，它会自行归档技能（参见 [SKILL.md](SKILL.md)）。请不要手动编写技能文件；代理生成的文件反映了浏览器中实际工作的内容。
 - 打开一个 PR，将生成的 `domain-skills/<site>/` 文件夹复制到此仓库的 `agent-workspace/domain-skills/` 示例中——小而专注非常好。
 - 同样欢迎错误修复、文档调整和辅助改进。
 - 浏览现有技能（`github/`、`linkedin/`、`amazon/`、...）以了解其形状。

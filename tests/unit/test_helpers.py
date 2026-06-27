@@ -77,7 +77,7 @@ def test_page_info_raises_clear_error_on_js_exception():
             helpers.page_info()
 
 
-# --- fill_input ---
+# --- fill_input 部分 ---
 
 def test_fill_input_focuses_types_and_fires_events():
     cdp_calls = []
@@ -89,7 +89,7 @@ def test_fill_input_focuses_types_and_fires_events():
 
     def fake_js(expr, **kwargs):
         js_calls.append(expr)
-        return True  # focus call must return True (element found)
+        return True  # focus 调用必须返回 True（元素已找到）
 
     with patch("web_agent.helpers.cdp", side_effect=fake_cdp), \
          patch("web_agent.helpers.js", side_effect=fake_js):
@@ -103,7 +103,7 @@ def test_fill_input_focuses_types_and_fires_events():
 
 def test_fill_input_raises_when_element_not_found():
     def fake_js(expr, **kwargs):
-        return False  # element not found
+        return False  # 元素未找到
 
     with patch("web_agent.helpers.js", side_effect=fake_js):
         with pytest.raises(RuntimeError, match="element not found"):
@@ -121,27 +121,27 @@ def test_fill_input_clear_first_sends_select_all_then_backspace():
         return {}
 
     def fake_js(expr, **kwargs):
-        return True  # element found
+        return True  # 元素已找到
 
     with patch("web_agent.helpers.cdp", side_effect=fake_cdp), \
          patch("web_agent.helpers.js", side_effect=fake_js):
         helpers.fill_input("#inp", "x", clear_first=True)
 
-    # The "a" must be dispatched with the platform-correct modifier (Meta=4 on
-    # macOS, Ctrl=2 elsewhere). Without the modifier, the field would never get
-    # selected — it would just receive a literal "a".
+    # "a" 必须使用平台正确的修饰符派发（macOS 上 Meta=4，
+    # 其他平台 Ctrl=2）。没有修饰符，字段永远不会被选中 ——
+    # 它只会接收到一个字面的 "a"。
     expected_mod = 4 if sys.platform == "darwin" else 2
     a_events = [e for e in key_events if e.get("key") == "a"]
     assert a_events, "expected an 'a' key event for select-all"
     assert all(e.get("modifiers") == expected_mod for e in a_events), \
         f"select-all 'a' must carry modifiers={expected_mod}; got {[e.get('modifiers') for e in a_events]}"
 
-    # Crucial: no `char` event for the "a" — emitting one makes Chrome treat
-    # Cmd/Ctrl+A as a printable letter instead of a shortcut.
+    # 关键：不应对 "a" 发出 `char` 事件 —— 发出后 Chrome 会将
+    # Cmd/Ctrl+A 视为可打印字符而不是快捷键。
     assert not any(e.get("type") == "char" and e.get("text") == "a" for e in key_events), \
         "select-all must not emit a 'char' event with text='a' (would cancel the shortcut)"
 
-    # Backspace still fires (via press_key, which uses keyDown).
+    # Backspace 仍然会触发（通过 press_key，使用 keyDown）。
     keys_down = [e.get("key") for e in key_events if e.get("type") in ("keyDown", "rawKeyDown")]
     assert "Backspace" in keys_down
 
@@ -155,7 +155,7 @@ def test_fill_input_no_clear_skips_ctrl_a():
         return {}
 
     def fake_js(expr, **kwargs):
-        return True  # element found
+        return True  # 元素已找到
 
     with patch("web_agent.helpers.cdp", side_effect=fake_cdp), \
          patch("web_agent.helpers.js", side_effect=fake_js):
@@ -165,7 +165,7 @@ def test_fill_input_no_clear_skips_ctrl_a():
     assert "Backspace" not in keys_seen
 
 
-# --- wait_for_element ---
+# --- wait_for_element 部分 ---
 
 def test_wait_for_element_returns_true_when_found_immediately():
     def fake_js(expr, **kwargs):
@@ -181,7 +181,7 @@ def test_wait_for_element_returns_false_on_timeout():
 
     with patch("web_agent.helpers.js", side_effect=fake_js), \
          patch("web_agent.helpers.time") as mock_time:
-        # simulate time advancing past the deadline immediately
+        # 模拟时间立即超过截止时间
         start = time.time()
         mock_time.time.side_effect = [start, start + 5.0]
         mock_time.sleep = lambda _: None
@@ -198,11 +198,11 @@ def test_wait_for_element_visible_uses_check_visibility():
     with patch("web_agent.helpers.js", side_effect=fake_js):
         helpers.wait_for_element("#btn", visible=True)
 
-    # Prefers checkVisibility (walks ancestor chain) with a computed-style
-    # fallback for older Chrome.
+    # 优先使用 checkVisibility（遍历祖先链），对旧版 Chrome 回退到
+    # getComputedStyle。
     assert any("checkVisibility" in e for e in js_exprs)
     assert any("getComputedStyle" in e for e in js_exprs)
-    # must NOT use offsetParent (fails for position:fixed elements)
+    # 绝不能使用 offsetParent（对 position:fixed 元素会失败）
     assert not any("offsetParent" in e for e in js_exprs)
 
 
@@ -219,7 +219,7 @@ def test_wait_for_element_non_visible_uses_simple_check():
     assert any("querySelector" in e and "offsetParent" not in e for e in js_exprs)
 
 
-# --- wait_for_network_idle ---
+# --- wait_for_network_idle 部分 ---
 
 def test_wait_for_network_idle_returns_true_when_no_events():
     call_count = 0
@@ -232,7 +232,7 @@ def test_wait_for_network_idle_returns_true_when_no_events():
     with patch("web_agent.helpers._send", side_effect=fake_send), \
          patch("web_agent.helpers.time") as mock_time:
         start = 1000.0
-        # first call: not idle yet; second call: idle window elapsed
+        # 第一次调用：尚未空闲；第二次调用：空闲窗口已过
         mock_time.time.side_effect = [start, start, start, start + 0.6, start + 0.6]
         mock_time.sleep = lambda _: None
         result = helpers.wait_for_network_idle(timeout=5.0, idle_ms=500)
@@ -241,14 +241,14 @@ def test_wait_for_network_idle_returns_true_when_no_events():
 
 
 def test_wait_for_network_idle_waits_for_inflight_request():
-    # Verifies inflight tracking: must not return True until loadingFinished,
-    # even though >idle_ms elapses between requestWillBeSent and loadingFinished.
-    # An event-silence-only implementation would return True at iter2 (wrong).
+    # 验证进行中请求跟踪：必须等到 loadingFinished 才能返回 True，
+    # 即使 requestWillBeSent 和 loadingFinished 之间已超过 idle_ms。
+    # 仅基于事件静默的实现会在 iter2 返回 True（错误的）。
     events_seq = [
         [{"method": "Network.requestWillBeSent", "params": {"requestId": "req1"}}],
-        [],   # >500ms elapsed — old impl returns True here; new must NOT
+        [],   # 已超过 500ms —— 旧实现在此处返回 True；新实现绝不能
         [{"method": "Network.loadingFinished",   "params": {"requestId": "req1"}}],
-        [],   # idle_ms after loadingFinished → return True
+        [],   # loadingFinished 后的 idle_ms → 返回 True
     ]
     idx = 0
 
@@ -261,30 +261,30 @@ def test_wait_for_network_idle_waits_for_inflight_request():
     with patch("web_agent.helpers._send", side_effect=fake_send), \
          patch("web_agent.helpers.time") as mock_time:
         start = 1000.0
-        # inflight non-empty → short-circuit skips time.time() in idle check for iter1/iter2
+        # 进行中请求非空 → 空闲检查中的短路跳过了 iter1/iter2 的 time.time()
         mock_time.time.side_effect = [
-            start, start,       # deadline + last_activity init
-            start + 0.1,        # iter1 while-check
-            start + 0.1,        # iter1 rWS last_activity update
-                                # iter1 idle-check: inflight non-empty → short-circuit
-            start + 0.7,        # iter2 while-check (>500ms since rWS but request still in flight)
-                                # iter2 idle-check: inflight non-empty → short-circuit
-            start + 0.8,        # iter3 while-check
-            start + 0.8,        # iter3 lF last_activity update
-            start + 0.8,        # iter3 idle-check: 0ms < 500 → not idle
-            start + 1.4,        # iter4 while-check
-            start + 1.4,        # iter4 idle-check: 600ms >= 500 → True
+            start, start,       # 截止时间 + last_activity 初始化
+            start + 0.1,        # iter1 while 检查
+            start + 0.1,        # iter1 rWS last_activity 更新
+                                # iter1 空闲检查：进行中请求非空 → 短路
+            start + 0.7,        # iter2 while 检查（距 rWS 已 >500ms 但请求仍在进行中）
+                                # iter2 空闲检查：进行中请求非空 → 短路
+            start + 0.8,        # iter3 while 检查
+            start + 0.8,        # iter3 lF last_activity 更新
+            start + 0.8,        # iter3 空闲检查：0ms < 500 → 非空闲
+            start + 1.4,        # iter4 while 检查
+            start + 1.4,        # iter4 空闲检查：600ms >= 500 → True
         ]
         mock_time.sleep = lambda _: None
         result = helpers.wait_for_network_idle(timeout=5.0, idle_ms=500)
 
     assert result is True
-    assert idx == 4  # did not short-circuit at iter2 despite silence > idle_ms
+    assert idx == 4  # 在 iter2 尽管静默超过 idle_ms 但没有短路返回
 
 
 def test_wait_for_network_idle_returns_false_on_timeout():
-    # Continuous rWS keeps inflight non-empty → idle check short-circuits every iteration.
-    # time.time() is only called for while-check and rWS last_activity (not idle check).
+    # 持续的 rWS 使进行中请求保持非空 → 空闲检查每次迭代都短路。
+    # time.time() 只在 while 检查和 rWS last_activity 时被调用（不在空闲检查中）。
     def fake_send(req):
         return {"events": [{"method": "Network.requestWillBeSent", "params": {"requestId": "r"}}]}
 
@@ -292,11 +292,11 @@ def test_wait_for_network_idle_returns_false_on_timeout():
          patch("web_agent.helpers.time") as mock_time:
         start = 1000.0
         mock_time.time.side_effect = [
-            start, start,       # deadline + last_activity init
-            start + 0.1,        # iter1 while-check (in deadline)
-            start + 0.1,        # iter1 rWS last_activity update
-                                # iter1 idle-check: inflight non-empty → short-circuit
-            start + 20.0,       # iter2 while-check (past deadline → exit)
+            start, start,       # 截止时间 + last_activity 初始化
+            start + 0.1,        # iter1 while 检查（在截止时间内）
+            start + 0.1,        # iter1 rWS last_activity 更新
+                                # iter1 空闲检查：进行中请求非空 → 短路
+            start + 20.0,       # iter2 while 检查（超过截止时间 → 退出）
         ]
         mock_time.sleep = lambda _: None
         result = helpers.wait_for_network_idle(timeout=10.0, idle_ms=500)
@@ -306,23 +306,21 @@ def test_wait_for_network_idle_returns_false_on_timeout():
 
 
 def test_wait_for_network_idle_filters_events_to_active_session():
-    """Background tabs (e.g. a polling page the agent switched away from) keep
-    emitting Network events into the daemon's global buffer. The wait must
-    filter by session_id of the currently-attached tab — otherwise it would
-    see the background tab's traffic and either fail to return idle or wait
-    on the wrong tab's requests."""
+    """后台标签页（例如代理切换离开的轮询页面）持续向守护进程的
+    全局缓冲区发送 Network 事件。等待必须按当前附加标签页的 session_id
+    进行过滤 —— 否则它会看到后台标签页的流量，要么无法返回空闲状态，
+    要么等待错误标签页的请求。"""
     active = "session-ACTIVE"
     background = "session-BACKGROUND"
 
-    # First /drain_events/ payload: rWS + lF on the BACKGROUND session that we
-    # must ignore, plus zero events on the active session. With filtering, the
-    # active session sees no traffic and the idle window can elapse.
+    # 第一次 /drain_events/ 负载：必须忽略的 BACKGROUND 会话上的 rWS + lF，
+    # 加上活跃会话上的零事件。通过过滤，活跃会话看不到流量，空闲窗口可以过去。
     events_seq = [
         [
             {"session_id": background, "method": "Network.requestWillBeSent", "params": {"requestId": "bg1"}},
             {"session_id": background, "method": "Network.loadingFinished",   "params": {"requestId": "bg1"}},
         ],
-        [],  # second drain — quiet on both sessions; idle window should fire here
+        [],  # 第二次 drain —— 两个会话都安静；空闲窗口应该在此处触发
     ]
     drain_idx = 0
 
@@ -339,7 +337,7 @@ def test_wait_for_network_idle_filters_events_to_active_session():
     with patch("web_agent.helpers._send", side_effect=fake_send), \
          patch("web_agent.helpers.time") as mock_time:
         start = 1000.0
-        # No inflight on active session → idle check uses time.time().
+        # 活跃会话上没有进行中请求 → 空闲检查使用 time.time()。
         mock_time.time.side_effect = [start, start, start, start + 0.6, start + 0.6]
         mock_time.sleep = lambda _: None
         result = helpers.wait_for_network_idle(timeout=5.0, idle_ms=500)

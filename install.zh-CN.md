@@ -41,27 +41,6 @@ PY
 
 复选框和弹出窗口需要用户操作。
 
-## 云浏览器
-
-云是可选的。本地 Chrome 不需要 Browser Use API 密钥。
-
-使用任何简短的虚构名称；下面的 `r7k2` 只是一个占位符。
-
-```bash
-web-agent auth login
-web-agent <<'PY'
-start_remote_daemon("r7k2")
-PY
-```
-
-然后通过名称使用它：
-
-```bash
-BU_NAME=r7k2 web-agent <<'PY'
-print(page_info())
-PY
-```
-
 ## 如果仍然有问题
 
 ```bash
@@ -70,7 +49,7 @@ web-agent --doctor
 
 使用输出：
 
-- `chrome running` 失败：要求用户打开 Chrome，或使用隔离/云浏览器。
+- `chrome running` 失败：要求用户打开 Chrome。
 - `daemon alive` 失败：缺少 Chrome 远程调试权限，Chrome 已关闭，或 CDP 端点不可达。
 - 有可用更新：当您决定升级时运行 `web-agent --update -y`。
 

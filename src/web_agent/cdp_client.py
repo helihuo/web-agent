@@ -31,11 +31,12 @@ class CDPClient:
         self._event_registry = EventRegistry()  # 事件注册表
     
     async def start(self):
-        """建立 WebSocket 连接并启动接收循环"""
+        """建立 WebSocket 连接并将接收循环作为后台任务启动"""
         try:
             self._ws = await websockets.connect(self.url)  # 建立连接
             logger.info(f"已连接到 CDP: {self.url}")
-            await self._receive_loop()  # 启动接收循环
+            # 将接收循环作为后台任务启动，避免阻塞 start() 方法
+            self._recv_task = asyncio.create_task(self._receive_loop())
         except Exception as e:
             logger.error(f"连接失败: {e}")
             raise
