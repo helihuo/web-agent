@@ -7,6 +7,7 @@ from pathlib import Path
 from . import _ipc as ipc
 from . import paths
 from .helpers import NAME, INTERNAL
+from .oplog import get_session
 from .paths import _load_env, _load_env_file
 from .cdp_client import CDPClient
 
@@ -201,12 +202,15 @@ class Daemon:
         self.stop = asyncio.Event()
         url = get_ws_url()
         log("connecting to browser...") # 不再打印完整的 WebSocket URL，避免泄露敏感信息
+        get_session().record_event("daemon_connecting")
         self.cdp = CDPClient(url)
         try:
             await self.cdp.start()
         except Exception as e:
+            get_session().record_event("daemon_connect_failed", {"error": str(e)})
             raise RuntimeError(f"CDP WS handshake failed: {e} -- click Allow in Chrome if prompted, then retry")
         await self.attach_first_page()
+        get_session().record_event("daemon_started")
         orig = self.cdp._event_registry.handle_event
         mark_js = "if(!document.title.startsWith('\U0001F434'))document.title='\U0001F434 '+document.title"
         async def tap(method, params, session_id=None):
@@ -300,7 +304,7 @@ class Daemon:
             )))
             return {"session_id": self.session}
         if meta == "pending_dialog": return {"dialog": self.dialog}
-        if meta == "shutdown":    self.stop.set(); return {"ok": True}
+        if meta == "shutdown":    self.stop.set(); get_session().record_event("daemon_shutdown"); return {"ok": True}
 
         method = req["method"]
         params = req.get("params") or {}

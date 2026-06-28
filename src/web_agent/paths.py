@@ -1,4 +1,8 @@
-"""web-agent 文件系统布局。"""
+"""web-agent 文件系统布局。
+
+.env 文件支持行内注释（值后面的 # 注释），引号内的 # 不受影响。
+例如：KEY=value # 这是注释、KEY="value#not_comment"。
+"""
 from __future__ import annotations
 
 import json
@@ -45,13 +49,28 @@ def workspace_dir() -> Path:
     return ensure_private_dir(Path(raw).expanduser().resolve() if raw else home_dir() / "agent-workspace")
 
 
+def _strip_env_inline_comment(value: str) -> str:
+    """剥离 .env 值中的行内注释（# 后面的内容），保留引号内的 # 不受影响。"""
+    in_single = False  # 是否在单引号字符串内
+    in_double = False  # 是否在双引号字符串内
+    for i, ch in enumerate(value):
+        if ch == "'" and not in_double:
+            in_single = not in_single  # 切换单引号状态
+        elif ch == '"' and not in_single:
+            in_double = not in_double  # 切换双引号状态
+        elif ch == '#' and not in_single and not in_double:
+            return value[:i]  # 找到引号外的 #，截断注释
+    return value
+
+
 def _load_env_file(p):
-    """解析 .env 文件并设置环境变量。"""
+    """解析 .env 文件并设置环境变量，支持行内注释。"""
     for line in p.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, v = line.split("=", 1)
+        v = _strip_env_inline_comment(v)  # 剥离行内注释
         os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
@@ -65,10 +84,35 @@ def _load_env():
         _load_env_file(p)
 
 
+def _strip_jsonc_comments(text: str) -> str:
+    """剥离 JSONC 风格的 // 单行注释，保留字符串内的 // 不受影响。"""
+    import re
+    result = []  # 存储处理后的行
+    for line in text.splitlines():
+        in_string = False  # 当前是否在双引号字符串内
+        slash_pos = -1  # 注释 // 的起始位置，-1 表示未找到
+        i = 0
+        while i < len(line):
+            ch = line[i]
+            if ch == '"' and (i == 0 or line[i - 1] != '\\'):
+                in_string = not in_string  # 切换字符串状态
+            elif ch == '/' and not in_string and i + 1 < len(line) and line[i + 1] == '/':
+                slash_pos = i  # 找到字符串外的 // 注释
+                break
+            i += 1
+        if slash_pos >= 0:
+            result.append(line[:slash_pos])  # 截断注释部分
+        else:
+            result.append(line)
+    return "\n".join(result)
+
+
 def read_json_config(path: Path) -> dict:
-    """读取 JSON 配置文件，文件不存在或解析失败时返回空字典。"""
+    """读取 JSON/JSONC 配置文件，支持 // 单行注释，文件不存在或解析失败时返回空字典。"""
     try:
-        return json.loads(path.read_text())
+        raw = path.read_text(encoding="utf-8")
+        cleaned = _strip_jsonc_comments(raw)  # 剥离注释后再解析
+        return json.loads(cleaned)
     except (FileNotFoundError, OSError, ValueError):
         return {}
 

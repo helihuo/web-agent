@@ -23,6 +23,7 @@ from .admin import (
 )
 from . import telemetry
 from .helpers import *
+from .oplog import reset_session, close_session
 
 HELP = """Web Agent
 
@@ -95,51 +96,57 @@ def main():
     args = sys.argv[1:]
     if not (args and args[0] == "telemetry"):
         telemetry.capture("web_agent.cli", {"command": _telemetry_command(args)})
-    if args and args[0] in {"-h", "--help"}:
-        print(HELP)
-        return
-    if args and args[0] == "--version":
-        print(_version() or "unknown")
-        return
-    if args and args[0] == "--doctor":
-        sys.exit(run_doctor())
-    if args and args[0] == "doctor":
-        rest = args[1:]
-        if rest == ["--fix-snap"]:
-            sys.exit(run_doctor_fix_snap())
-        if rest:
-            print("usage: web-agent doctor [--fix-snap]", file=sys.stderr)
-            sys.exit(2)
-        sys.exit(run_doctor())
-    if args and args[0] == "skill":
-        if len(args) != 1:
-            print("usage: web-agent skill", file=sys.stderr)
-            sys.exit(2)
-        _print_skill()
-        return
-    if args and args[0] == "telemetry":
-        sys.exit(telemetry.run_telemetry_cli(args[1:]))
-    if args and args[0] == "--update":
-        yes = any(a in {"-y", "--yes"} for a in args[1:])
-        sys.exit(run_update(yes=yes))
-    if args and args[0] == "--reload":
-        restart_daemon()
-        print("daemon stopped — will restart fresh on next call")
-        return
-    if args and args[0] == "--debug-clicks":
-        os.environ["WA_DEBUG_CLICKS"] = "1"
-        args = args[1:]
-    if not args and not sys.stdin.isatty():
-        code = sys.stdin.read()
-        if not code.strip():
+    # 为本次调用创建新的 oplog 会话
+    reset_session()
+    try:
+        if args and args[0] in {"-h", "--help"}:
+            print(HELP)
+            return
+        if args and args[0] == "--version":
+            print(_version() or "unknown")
+            return
+        if args and args[0] == "--doctor":
+            sys.exit(run_doctor())
+        if args and args[0] == "doctor":
+            rest = args[1:]
+            if rest == ["--fix-snap"]:
+                sys.exit(run_doctor_fix_snap())
+            if rest:
+                print("usage: web-agent doctor [--fix-snap]", file=sys.stderr)
+                sys.exit(2)
+            sys.exit(run_doctor())
+        if args and args[0] == "skill":
+            if len(args) != 1:
+                print("usage: web-agent skill", file=sys.stderr)
+                sys.exit(2)
+            _print_skill()
+            return
+        if args and args[0] == "telemetry":
+            sys.exit(telemetry.run_telemetry_cli(args[1:]))
+        if args and args[0] == "--update":
+            yes = any(a in {"-y", "--yes"} for a in args[1:])
+            sys.exit(run_update(yes=yes))
+        if args and args[0] == "--reload":
+            restart_daemon()
+            print("daemon stopped — will restart fresh on next call")
+            return
+        if args and args[0] == "--debug-clicks":
+            os.environ["WA_DEBUG_CLICKS"] = "1"
+            args = args[1:]
+        if not args and not sys.stdin.isatty():
+            code = sys.stdin.read()
+            if not code.strip():
+                sys.exit(USAGE)
+        else:
             sys.exit(USAGE)
-    else:
-        sys.exit(USAGE)
-    print_update_banner()
-    # 确保 daemon 正在运行（无论 Chrome 是否监听，daemon 都必须启动）
-    if not daemon_alive():
-        ensure_daemon()
-    exec(code, globals())
+        print_update_banner()
+        # 确保 daemon 正在运行（无论 Chrome 是否监听，daemon 都必须启动）
+        if not daemon_alive():
+            ensure_daemon()
+        exec(code, globals())
+    finally:
+        # 确保会话日志在退出前被正确关闭
+        close_session()
 
 
 if __name__ == "__main__":

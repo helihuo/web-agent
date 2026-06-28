@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from . import _ipc as ipc
 from . import paths
+from .oplog import get_session, oplog_step
 from .paths import _load_env, _load_env_file
 
 
@@ -115,6 +116,7 @@ def _is_illegal_return_error(exc):
 
 
 # --- 导航 / 页面 ---
+@oplog_step
 def goto_url(url):
     r = cdp("Page.navigate", url=url)
     if os.environ.get("WA_DOMAIN_SKILLS") != "1":
@@ -122,6 +124,7 @@ def goto_url(url):
     d = (AGENT_WORKSPACE / "domain-skills" / (urlparse(url).hostname or "").removeprefix("www.").split(".")[0])
     return {**r, "domain_skills": sorted(p.name for p in d.rglob("*.md"))[:10]} if d.is_dir() else r
 
+@oplog_step
 def page_info():
     """{url, title, w, h, sx, sy, pw, ph} — 视口 + 滚动 + 页面尺寸。
 
@@ -137,13 +140,21 @@ def page_info():
 # --- 输入 ---
 _debug_click_counter = 0
 
+@oplog_step
 def click_at_xy(x, y, button="left", clicks=1):
     if os.environ.get("WA_DEBUG_CLICKS"):
         global _debug_click_counter
         try:
             from PIL import Image, ImageDraw
             dpr = js("window.devicePixelRatio") or 1
-            path = capture_screenshot(str(ipc._TMP / f"debug_click_{_debug_click_counter}.png"))
+            # 优先保存到 oplog 截图目录，否则保存到临时目录
+            session = get_session()
+            screenshot_dir = session.get_screenshot_dir()
+            if screenshot_dir is not None:
+                save_path = str(screenshot_dir / f"debug_click_{_debug_click_counter}.png")
+            else:
+                save_path = str(ipc._TMP / f"debug_click_{_debug_click_counter}.png")
+            path = capture_screenshot(save_path)
             img = Image.open(path)
             draw = ImageDraw.Draw(img)
             px, py = int(x * dpr), int(y * dpr)
@@ -153,15 +164,19 @@ def click_at_xy(x, y, button="left", clicks=1):
             draw.line([px, py - r - int(5 * dpr), px, py + r + int(5 * dpr)], fill="red", width=int(2 * dpr))
             img.save(path)
             print(f"[debug_click] saved {path} (x={x}, y={y}, dpr={dpr})")
+            # 将调试截图关联到 oplog 日志（screenshot 开关控制是否记录）
+            session.attach_screenshot(path)
         except Exception as e:
             print(f"[debug_click] overlay failed: {e}")
         _debug_click_counter += 1
     cdp("Input.dispatchMouseEvent", type="mousePressed", x=x, y=y, button=button, clickCount=clicks)
     cdp("Input.dispatchMouseEvent", type="mouseReleased", x=x, y=y, button=button, clickCount=clicks)
 
+@oplog_step
 def type_text(text):
     cdp("Input.insertText", text=text)
 
+@oplog_step
 def fill_input(selector, text, clear_first=True, timeout=0.0):
     """填充由框架管理的输入框（React 受控组件、Vue v-model、Ember 追踪属性）。
 
@@ -209,6 +224,7 @@ _KEYS = {  # 按键 → (windowsVirtualKeyCode, code, text)
     "Home": (36, "Home", ""), "End": (35, "End", ""),
     "PageUp": (33, "PageUp", ""), "PageDown": (34, "PageDown", ""),
 }
+@oplog_step
 def press_key(key, modifiers=0):
     """修饰键位域：1=Alt，2=Ctrl，4=Meta(Cmd)，8=Shift。
     特殊按键（Enter、Tab、方向键、Backspace 等）携带其虚拟键码，
@@ -222,11 +238,13 @@ def press_key(key, modifiers=0):
         cdp("Input.dispatchKeyEvent", type="char", text=text, **{k: v for k, v in base.items() if k != "text"})
     cdp("Input.dispatchKeyEvent", type="keyUp", **base)
 
+@oplog_step
 def scroll(x, y, dy=-300, dx=0):
     cdp("Input.dispatchMouseEvent", type="mouseWheel", x=x, y=y, deltaX=dx, deltaY=dy)
 
 
 # --- 视觉 ---
+@oplog_step
 def capture_screenshot(path=None, full=False, max_dim=None):
     """保存当前视口的 PNG 截图。在 2× 显示器上设置 max_dim=1800，
     可使文件保持在某些图像感知 LLM 所要求的每边不超过 2000 像素的限制内。"""
@@ -250,6 +268,7 @@ def _is_agent_startup_placeholder(title, url):
     )
 
 
+@oplog_step
 def list_tabs(include_chrome=True):
     out = []
     for t in cdp("Target.getTargets")["targetInfos"]:
@@ -265,6 +284,7 @@ def list_tabs(include_chrome=True):
         })
     return out
 
+@oplog_step
 def current_tab():
     r = _send({"meta": "current_tab"})
     return {
@@ -279,6 +299,7 @@ def _mark_tab():
     try: cdp("Runtime.evaluate", expression="if(!document.title.startsWith('\U0001F434'))document.title='\U0001F434 '+document.title")
     except Exception: pass
 
+@oplog_step
 def switch_tab(target):
     # 接受原始 targetId 字符串或 current_tab() / list_tabs() 返回的字典，
     # 这样 `switch_tab(current_tab())` 无需手动取 ["targetId"] 即可工作。
@@ -293,6 +314,7 @@ def switch_tab(target):
     _mark_tab()
     return sid
 
+@oplog_step
 def new_tab(url="about:blank"):
     # 始终先创建空白页，再导航：将 url 传给 createTarget 会与 attach 产生竞争，
     # 导致短暂的 about:blank 在调用方轮询时就已经 "complete"，
@@ -312,6 +334,7 @@ def new_tab(url="about:blank"):
         goto_url(url)
     return tid
 
+@oplog_step
 def close_tab(target=None):
     """关闭标签页。如果省略 `target`，则关闭当前已附加的标签页。
     接受原始 targetId 字符串或 list_tabs()/current_tab() 返回的字典。"""
@@ -321,6 +344,7 @@ def close_tab(target=None):
     cdp("Target.closeTarget", targetId=target_id)
 
 
+@oplog_step
 def ensure_real_tab():
     """如果当前标签页是 chrome:// / 内部页面 / 已过时，则切换到真实的用户标签页。"""
     tabs = list_tabs(include_chrome=False)
@@ -335,6 +359,7 @@ def ensure_real_tab():
     switch_tab(tabs[0]["targetId"])
     return tabs[0]
 
+@oplog_step
 def iframe_target(url_substr):
     """返回第一个 URL 包含 `url_substr` 的 iframe target。配合 js(..., target_id=...) 使用。"""
     for t in cdp("Target.getTargets")["targetInfos"]:
@@ -344,9 +369,11 @@ def iframe_target(url_substr):
 
 
 # --- 工具函数 ---
+@oplog_step
 def wait(seconds=1.0):
     time.sleep(seconds)
 
+@oplog_step
 def wait_for_load(timeout=15.0):
     """轮询等待 document.readyState == 'complete'，超时则返回 False。"""
     deadline = time.time() + timeout
@@ -355,6 +382,7 @@ def wait_for_load(timeout=15.0):
         time.sleep(0.3)
     return False
 
+@oplog_step
 def wait_for_element(selector, timeout=10.0, visible=False):
     """轮询等待 querySelector(selector) 存在于 DOM 中，超时则返回 False。
 
@@ -385,6 +413,7 @@ def wait_for_element(selector, timeout=10.0, visible=False):
         time.sleep(0.3)
     return False
 
+@oplog_step
 def wait_for_network_idle(timeout=10.0, idle_ms=500):
     """等待所有进行中的请求完成，并且在 idle_ms 毫秒内没有新的 Network.* 事件到达。
 
@@ -419,6 +448,7 @@ def wait_for_network_idle(timeout=10.0, idle_ms=500):
         time.sleep(0.1)
     return False
 
+@oplog_step
 def js(expression, target_id=None):
     """在已附加的标签页（默认）或 iframe target（通过 iframe_target()）中执行 JS。
 
@@ -439,6 +469,7 @@ def js(expression, target_id=None):
 _KC = {k: v[0] for k, v in _KEYS.items()}
 
 
+@oplog_step
 def dispatch_key(selector, key="Enter", event="keypress"):
     """在匹配的元素上触发 DOM KeyboardEvent。
 
@@ -449,6 +480,7 @@ def dispatch_key(selector, key="Enter", event="keypress"):
         f"(()=>{{const e=document.querySelector({json.dumps(selector)});if(e){{e.focus();e.dispatchEvent(new KeyboardEvent({json.dumps(event)},{{key:{json.dumps(key)},code:{json.dumps(key)},keyCode:{kc},which:{kc},bubbles:true}}));}}}})()"
     )
 
+@oplog_step
 def upload_file(selector, path):
     """通过 CDP DOM.setFileInputFiles 在文件输入框上设置文件。`path` 为绝对文件路径（需要时可使用 tempfile.mkstemp）。"""
     doc = cdp("DOM.getDocument", depth=-1)
@@ -456,6 +488,7 @@ def upload_file(selector, path):
     if not nid: raise RuntimeError(f"no element for {selector}")
     cdp("DOM.setFileInputFiles", files=[path] if isinstance(path, str) else list(path), nodeId=nid)
 
+@oplog_step
 def http_get(url, headers=None, timeout=20.0):
     """纯 HTTP 请求 — 不使用浏览器。适用于静态页面 / API。批量请求时可包装在 ThreadPoolExecutor 中。
 

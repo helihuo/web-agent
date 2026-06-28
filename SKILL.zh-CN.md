@@ -50,6 +50,7 @@ chrome://inspect/#remote-debugging
 - 如果当前标签页已过时或为内部页面，调用 `ensure_real_tab()`。
 - 当坐标不是正确工具时，使用 `js(...)` 进行 DOM 检查或提取。
 - 登录墙：停止并询问。例外：当 Chrome 已登录时自动使用可用的 SSO；但对于密码、MFA、同意或模糊的账户选择仍需停止。
+- 截图 vs JS：不确定页面状态时截图；已知结构只需数据或精确交互时用 `js()`。
 - 原始 CDP 可通过 `cdp("Domain.method", ...)` 使用。
 
 ## 交互技能

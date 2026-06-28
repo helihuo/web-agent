@@ -1,0 +1,16 @@
+{
+  // 是否启用操作日志（默认 false）
+  // 启用后，每次浏览器操作、Daemon 事件、IPC 通信都会被记录
+  // 可通过环境变量 WA_OPLOG=1 临时覆盖
+  "enabled": false,
+
+  // 自定义日志目录路径（默认 null，使用项目根目录/oplog）
+  // 设置为绝对路径或相对路径，如 "D:/logs/oplog" 或 "./logs"
+  // 可通过环境变量 WA_OPLOG_DIR=/path 临时覆盖
+  "dir": null,
+
+  // 是否将项目原有截图记录到日志（默认 true）
+  // 如 WA_DEBUG_CLICKS 调试截图，screenshot=true 时截图路径记入日志，false 时截图正常产生但不记录
+  // 可通过环境变量 WA_OPLOG_SCREENSHOT=1 临时覆盖
+  "screenshot": true
+}

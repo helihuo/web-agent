@@ -15,6 +15,7 @@ from . import _ipc as ipc
 from . import auth
 from . import paths
 from .helpers import NAME, truncate_text
+from .oplog import get_session
 from .paths import _load_env, _load_env_file, read_json_config, write_json_config
 from .telemetry import _version
 
@@ -290,6 +291,7 @@ def run_doctor_fix_snap():
 
 def ensure_daemon(wait=60.0, name=None, env=None):
     """幂等操作。自动修复陈旧的 daemon、冷启动的 Chrome 以及 chrome://inspect 上缺失的允许操作。"""
+    get_session().record_event("ensure_daemon", {"name": name or NAME})
     if daemon_alive(name):
         # 陈旧的 daemon 会接受连接并回复 meta:*（纯 Python），即使到 Chrome 的 CDP WS 已断开
         # ——使用真实的 CDP 调用进行探测并要求返回 "result"
@@ -342,6 +344,7 @@ def restart_daemon(name=None):
     永远不会升级为按 pid 文件强制终止。
     """
     import signal
+    get_session().record_event("restart_daemon", {"name": name or NAME})
 
     name = name or NAME
     pid_path = str(ipc.pid_path(name))
